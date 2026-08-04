@@ -1,0 +1,296 @@
+@import "tailwindcss";
+
+/* ==================================================================== */
+/*  ImputeIQ — Design System                                            */
+/*                                                                      */
+/*  Built on Apple's three principles:                                  */
+/*    Clarity   — legible type, generous space, one restrained accent   */
+/*    Deference — chrome recedes; the data is the interface             */
+/*    Depth     — translucent materials layered over an ambient ground  */
+/*                                                                      */
+/*  Tailwind's default gray/blue ramps are deliberately REMAPPED to     */
+/*  Apple's system palette below. That means existing utilities like    */
+/*  `text-gray-500` or `border-gray-200` resolve to Apple colours       */
+/*  everywhere at once, instead of every component inventing its own    */
+/*  hex. Add new colours here, never inline.                            */
+/* ==================================================================== */
+
+@theme {
+  /* ---- Neutral ramp = Apple label / fill / separator greys --------- */
+  --color-gray-50: #fafafa;
+  --color-gray-100: #f5f5f7; /* system surface           */
+  --color-gray-200: #e8e8ed; /* separator                */
+  --color-gray-300: #d2d2d7; /* strong separator         */
+  --color-gray-400: #aeaeb2; /* quaternary label         */
+  --color-gray-500: #8e8e93; /* tertiary label           */
+  --color-gray-600: #6e6e73; /* secondary label          */
+  --color-gray-700: #3a3a3c;
+  --color-gray-800: #2c2c2e;
+  --color-gray-900: #1d1d1f; /* primary label            */
+
+  /* ---- Accent = Apple blue ---------------------------------------- */
+  --color-blue-50: #eef5fd;
+  --color-blue-100: #d8e9fb;
+  --color-blue-200: #a9cff7;
+  --color-blue-300: #66b2ff;
+  --color-blue-400: #2196f3;
+  --color-blue-500: #0071e3; /* the accent               */
+  --color-blue-600: #0077ed; /* hover                    */
+  --color-blue-700: #0a5bb8;
+
+  /* ---- Semantic (Apple system colours) ---------------------------- */
+  --color-success: #34c759;
+  --color-success-fg: #1f8a3d;
+  --color-success-bg: #e8f8ed;
+  --color-warning: #ff9f0a;
+  --color-warning-fg: #9a6100;
+  --color-warning-bg: #fff4e0;
+  --color-danger: #ff3b30;
+  --color-danger-fg: #d70015;
+  --color-danger-bg: #ffecea;
+
+  /* ---- Radii: one continuous scale, no arbitrary values ----------- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-3xl: 30px;
+
+  /* ---- Elevation: soft, layered, never harsh ---------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 4px 10px rgba(0, 0, 0, 0.05), 0 24px 56px rgba(0, 0, 0, 0.11);
+
+  /* ---- Type ------------------------------------------------------- */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Helvetica Neue", sans-serif;
+  --font-display: "Inter Tight", -apple-system, BlinkMacSystemFont,
+    "SF Pro Display", sans-serif;
+}
+
+:root {
+  /* Apple's standard ease — used for every transition in the app so
+     motion feels like one system rather than per-component guesses. */
+  --ease-out-apple: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-apple: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --iq-surface: #f5f5f7;
+  --iq-text: #1d1d1f;
+  --iq-text-secondary: #6e6e73;
+  --iq-text-muted: #8e8e93;
+  --iq-blue: #0071e3;
+  --iq-error: #d70015;
+}
+
+/* ==================================================================== */
+/*  Base                                                                */
+/* ==================================================================== */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--iq-surface);
+  color: var(--iq-text);
+  font-family: var(--font-sans);
+  /* Apple renders text lighter; this stops Inter looking heavy on macOS */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Display face + tighter tracking for headings, matching SF Pro Display's
+   optical sizing behaviour at large sizes. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.021em;
+}
+
+/* ==================================================================== */
+/*  Ambient ground                                                      */
+/*                                                                      */
+/*  Glass only reads as glass when there is something behind it worth   */
+/*  refracting. These very low-opacity blooms give the frosted surfaces  */
+/*  something to pick up, without becoming decorative noise.            */
+/* ==================================================================== */
+.iq-ambient {
+  position: relative;
+  background-color: var(--iq-surface);
+  isolation: isolate;
+}
+
+.iq-ambient::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(58rem 42rem at 12% -8%, rgba(0, 113, 227, 0.09), transparent 60%),
+    radial-gradient(46rem 36rem at 92% 6%, rgba(120, 88, 232, 0.07), transparent 62%),
+    radial-gradient(52rem 40rem at 76% 98%, rgba(0, 178, 227, 0.06), transparent 60%);
+}
+
+/* ==================================================================== */
+/*  Materials                                                           */
+/*                                                                      */
+/*  Four tiers mirroring Apple's material hierarchy. Every translucent  */
+/*  surface in the app must use one of these — never a bespoke          */
+/*  bg-white/xx + backdrop-blur-xx pairing.                             */
+/*                                                                      */
+/*  The inset top highlight is what sells it: real glass catches light  */
+/*  on its top edge. Without it, translucency just looks like opacity.  */
+/* ==================================================================== */
+.glass-thin,
+.glass,
+.glass-thick,
+.glass-chrome {
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+/* Subtle — for nested panels sitting on an already-light card */
+.glass-thin {
+  background-color: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75), var(--shadow-sm);
+}
+
+/* Default — the standard card material */
+.glass {
+  background-color: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), var(--shadow-md);
+}
+
+/* Prominent — modals, sheets, anything that must sit above content */
+.glass-thick {
+  background-color: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: saturate(200%) blur(40px);
+  backdrop-filter: saturate(200%) blur(40px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), var(--shadow-xl);
+}
+
+/* Chrome — sidebars and toolbars: heavier blur, no lift, hairline edge */
+.glass-chrome {
+  background-color: rgba(255, 255, 255, 0.6);
+  -webkit-backdrop-filter: saturate(180%) blur(30px);
+  backdrop-filter: saturate(180%) blur(30px);
+  border: none;
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.06);
+}
+
+/* Scrim behind modals — dims and defocuses whatever is underneath */
+.glass-scrim {
+  background-color: rgba(0, 0, 0, 0.18);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* Interactive lift, for cards that respond to hover */
+.glass-interactive {
+  transition: transform 0.3s var(--ease-out-apple),
+    box-shadow 0.3s var(--ease-out-apple),
+    background-color 0.3s var(--ease-out-apple);
+}
+
+.glass-interactive:hover {
+  background-color: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), var(--shadow-lg);
+  transform: translateY(-1px);
+}
+
+/* ==================================================================== */
+/*  Controls                                                            */
+/* ==================================================================== */
+
+/* Apple's segmented control — the pill nav */
+.iq-segmented {
+  background-color: rgba(120, 120, 128, 0.12);
+  border-radius: 9999px;
+  padding: 3px;
+}
+
+.iq-segment-active {
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* Accessible focus ring — visible for keyboard users, silent for mouse */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--iq-blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ==================================================================== */
+/*  Scrollbars — thin and unobtrusive, appearing only against content   */
+/* ==================================================================== */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* ==================================================================== */
+/*  Motion                                                              */
+/* ==================================================================== */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes iq-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.iq-rise {
+  animation: rise 0.5s var(--ease-out-apple) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .glass-interactive:hover {
+    transform: none;
+  }
+}

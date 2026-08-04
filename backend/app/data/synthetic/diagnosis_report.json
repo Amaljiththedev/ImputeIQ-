@@ -1,0 +1,194 @@
+{
+  "alpha": 0.05,
+  "n_correct": 5,
+  "n_total": 6,
+  "accuracy_pct": 83.3,
+  "accuracy_by_mechanism": {
+    "MCAR": {
+      "correct": 3,
+      "total": 3,
+      "pct": 100.0
+    },
+    "MAR": {
+      "correct": 2,
+      "total": 2,
+      "pct": 100.0
+    },
+    "MNAR": {
+      "correct": 0,
+      "total": 1,
+      "pct": 0.0
+    }
+  },
+  "results": [
+    {
+      "file": "cardio_train_weight_mcar.csv",
+      "target_col": "weight",
+      "actual_mechanism": "MCAR",
+      "diagnosed_mechanism": "MCAR",
+      "diagnosis_detail": "Ambiguous: MCAR or MNAR (indistinguishable from observed data \u2014 littles_p=0.2474)",
+      "correct": true,
+      "littles_p_value": 0.247352,
+      "littles_suggests_mcar": true,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.951993,
+        "age": 0.861697,
+        "gender": 0.677041,
+        "height": 0.232163,
+        "ap_hi": 0.220195,
+        "ap_lo": 0.313685,
+        "cholesterol": 0.326087,
+        "gluc": 0.26675,
+        "smoke": 0.698923,
+        "alco": 0.142696,
+        "active": 0.012438,
+        "cardio": 0.990032
+      },
+      "significant_drivers": []
+    },
+    {
+      "file": "cardio_train_alco_mcar.csv",
+      "target_col": "alco",
+      "actual_mechanism": "MCAR",
+      "diagnosed_mechanism": "MCAR",
+      "diagnosis_detail": "Ambiguous: MCAR or MNAR (indistinguishable from observed data \u2014 littles_p=0.5806)",
+      "correct": true,
+      "littles_p_value": 0.580634,
+      "littles_suggests_mcar": true,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.714091,
+        "age": 0.273926,
+        "gender": 0.44086,
+        "height": 0.388086,
+        "weight": 0.725398,
+        "ap_hi": 0.625446,
+        "ap_lo": 0.415036,
+        "cholesterol": 0.44918,
+        "gluc": 0.12653,
+        "smoke": 0.819529,
+        "active": 0.503482,
+        "cardio": 0.790786
+      },
+      "significant_drivers": []
+    },
+    {
+      "file": "cardio_train_ap_hi_mar.csv",
+      "target_col": "ap_hi",
+      "actual_mechanism": "MAR",
+      "diagnosed_mechanism": "MAR",
+      "diagnosis_detail": "MAR (driver(s): age, ap_lo, cardio)",
+      "correct": true,
+      "littles_p_value": 0.0,
+      "littles_suggests_mcar": false,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.57746,
+        "age": 0.0,
+        "gender": 0.400892,
+        "height": 0.644245,
+        "weight": 0.205973,
+        "ap_lo": 0.00175,
+        "cholesterol": 0.008584,
+        "gluc": 0.009491,
+        "smoke": 0.676276,
+        "alco": 0.880793,
+        "active": 0.712239,
+        "cardio": 0.000256
+      },
+      "significant_drivers": [
+        "age",
+        "ap_lo",
+        "cardio"
+      ]
+    },
+    {
+      "file": "cardio_train_gluc_mar.csv",
+      "target_col": "gluc",
+      "actual_mechanism": "MAR",
+      "diagnosed_mechanism": "MAR",
+      "diagnosis_detail": "MAR (driver(s): smoke, active)",
+      "correct": true,
+      "littles_p_value": 0.0,
+      "littles_suggests_mcar": false,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.573785,
+        "age": 0.629871,
+        "gender": 0.153794,
+        "height": 0.959514,
+        "weight": 0.726651,
+        "ap_hi": 0.105448,
+        "ap_lo": 0.248558,
+        "cholesterol": 0.926976,
+        "smoke": 0.00435,
+        "alco": 0.351454,
+        "active": 0.0,
+        "cardio": 0.699465
+      },
+      "significant_drivers": [
+        "smoke",
+        "active"
+      ]
+    },
+    {
+      "file": "cardio_train_cholesterol_mnar.csv",
+      "target_col": "cholesterol",
+      "actual_mechanism": "MNAR",
+      "diagnosed_mechanism": "MAR",
+      "diagnosis_detail": "MAR (driver(s): weight, ap_hi, ap_lo, gluc, cardio)",
+      "correct": false,
+      "littles_p_value": 2e-06,
+      "littles_suggests_mcar": false,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.277681,
+        "age": 0.779007,
+        "gender": 0.767119,
+        "height": 0.240028,
+        "weight": 0.005373,
+        "ap_hi": 0.000658,
+        "ap_lo": 0.001729,
+        "gluc": 8e-06,
+        "smoke": 0.622318,
+        "alco": 0.387738,
+        "active": 0.548002,
+        "cardio": 0.001161
+      },
+      "significant_drivers": [
+        "weight",
+        "ap_hi",
+        "ap_lo",
+        "gluc",
+        "cardio"
+      ]
+    },
+    {
+      "file": "cardio_train_smoke_mcar.csv",
+      "target_col": "smoke",
+      "actual_mechanism": "MCAR",
+      "diagnosed_mechanism": "MCAR",
+      "diagnosis_detail": "Ambiguous: MCAR or MNAR (indistinguishable from observed data \u2014 littles_p=0.0516)",
+      "correct": true,
+      "littles_p_value": 0.05163,
+      "littles_suggests_mcar": true,
+      "categorical_assoc_p_values": {},
+      "numeric_assoc_p_values": {
+        "id": 0.051122,
+        "age": 0.840886,
+        "gender": 0.420753,
+        "height": 0.344411,
+        "weight": 0.920098,
+        "ap_hi": 0.27676,
+        "ap_lo": 0.895849,
+        "cholesterol": 0.303326,
+        "gluc": 0.363345,
+        "alco": 0.314499,
+        "active": 0.01088,
+        "cardio": 0.977613
+      },
+      "significant_drivers": []
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+1. Structural checks (do these first — before touching any values)
+
+ Check shape (df.shape) — does row/column count look sane?
+ Check dtypes (df.info()) — is every column the type you expect? (a numeric column showing as object means something non-numeric snuck in)
+ Check column names — consistent casing, no stray whitespace, no duplicate column names
+
+2. Find hidden/disguised missing values (do this before .isna() checks mean anything)
+
+ Scan for string placeholders masquerading as data: "NA", "N/A", "null", "none", "-", "?", "unknown", "missing", empty string ""
+ Scan numeric columns for sentinel values used instead of real blanks: 0, -1, 999, 9999 sitting suspiciously outside the normal range
+ Convert any of the above into real NaN so pandas can actually track them — don't clean around them while they're still disguised as strings
+
+3. Duplicates
+
+ Check for fully duplicate rows (df.duplicated().sum())
+ Check for duplicates ignoring the ID column (in case the ID was slightly altered but everything else matches)
+ Check for duplicate IDs with different data (a different kind of problem — possible data-entry conflict, not a simple duplicate)
+
+4. Categorical consistency
+
+ For every categorical column, run .unique() and look for: casing differences, leading/trailing whitespace, typos, synonyms meaning the same thing
+ Standardise each one to a single canonical spelling/casing
+ Check for categories that shouldn't logically exist (e.g. a "gender" value that's actually a typo'd age)
+
+5. Numeric plausibility
+
+ Check .describe() min/max for every numeric column — do the extremes make physical/logical sense? (negative age, BMI over 80, blood pressure of 0)
+ Decide per-column: drop the row, or is there a defensible correction (not a guess)
+ Check for values with implausible precision or formatting inconsistency (e.g. some ages as floats, some as ints)
+
+6. Now — and only now — assess real missing values
+
+ Run .isna().sum() per column (this is now meaningful, since step 2 converted disguised missing values into real NaNs)
+ Decide, per column, whether the missing count is manageable to drop, or too large and needs a different strategy
+ Confirm your decision doesn't wipe out a column entirely (if 90% of a column is missing, dropping rows isn't viable — that's a design decision to flag, not silently drop)
+
+7. Cross-column logical consistency (often skipped, worth doing)
+
+ Check for logically impossible combinations across columns (e.g. smoking_status = "Never" but a pack_years column > 0, if such a column existed)
+ Check that categorical relationships make sense (e.g. region values are all from an expected fixed set, no stray new categories appearing once cleaned)
+
+8. Final sanity pass
+
+ Re-run .info() and .describe() on the cleaned result
+ Confirm dtypes are correct (no lingering object columns that should be numeric)
+ Confirm no NaNs remain if your goal is a fully complete baseline
+ Record final row/column count vs. original, and % of data retained

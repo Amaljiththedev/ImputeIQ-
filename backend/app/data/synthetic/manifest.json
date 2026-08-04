@@ -1,0 +1,134 @@
+{
+  "seed": 123,
+  "source": "cardio_train_ground_truth.csv",
+  "n_rows": 5000,
+  "columns": {
+    "id": {
+      "mechanism": "none",
+      "rule": "Identifier column, never corrupted."
+    },
+    "cardio": {
+      "mechanism": "none",
+      "rule": "Target/label column, never corrupted."
+    },
+    "height": {
+      "mechanism": "none",
+      "rule": "Fully observed control column, used as a clean predictor in diagnosis tests."
+    },
+    "gender": {
+      "mechanism": "none",
+      "rule": "Fully observed control column."
+    },
+    "ap_lo": {
+      "mechanism": "none",
+      "rule": "Fully observed control column."
+    },
+    "weight": {
+      "mechanism": "MCAR",
+      "target_missing_rate": 0.08,
+      "actual_missing_rate": 0.08,
+      "rule": "Uniform random mask, independent of all other variables.",
+      "output_file": "cardio_train_weight_mcar.csv"
+    },
+    "alco": {
+      "mechanism": "MCAR",
+      "target_missing_rate": 0.05,
+      "actual_missing_rate": 0.05,
+      "rule": "Uniform random mask, independent of all other variables.",
+      "output_file": "cardio_train_alco_mcar.csv"
+    },
+    "ap_hi": {
+      "mechanism": "MAR",
+      "target_missing_rate": 0.15,
+      "actual_missing_rate": 0.15,
+      "driver_column": "age",
+      "rule": "Missingness probability increases with patient age (older patients more likely to skip BP measurement at routine visits).",
+      "output_file": "cardio_train_ap_hi_mar.csv"
+    },
+    "gluc": {
+      "mechanism": "MAR",
+      "target_missing_rate": 0.1,
+      "actual_missing_rate": 0.1,
+      "driver_column": "active",
+      "rule": "Missingness probability is higher for physically inactive patients (active=0), reflecting lower routine screening uptake.",
+      "output_file": "cardio_train_gluc_mar.csv"
+    },
+    "cholesterol": {
+      "mechanism": "MNAR",
+      "target_missing_rate": 0.12,
+      "actual_missing_rate": 0.12,
+      "rule": "Missingness probability increases with the patient's own true cholesterol level (higher cholesterol -> more likely missing), simulating avoidance/non-follow-up bias. Cannot be detected from observed data alone.",
+      "output_file": "cardio_train_cholesterol_mnar.csv"
+    },
+    "smoke": {
+      "mechanism": "MCAR",
+      "target_missing_rate": 0.03,
+      "actual_missing_rate": 0.03,
+      "rule": "Uniform random mask, independent of all other variables.",
+      "output_file": "cardio_train_smoke_mcar.csv"
+    }
+  },
+  "generated_files": [
+    {
+      "mechanism": "MCAR",
+      "target_column": "weight",
+      "driver_column": null,
+      "requested_rate": 0.08,
+      "actual_missing_count": 400,
+      "actual_missing_pct": 8.0,
+      "output_file": "cardio_train_weight_mcar.csv",
+      "unchanged_elsewhere": true
+    },
+    {
+      "mechanism": "MCAR",
+      "target_column": "alco",
+      "driver_column": null,
+      "requested_rate": 0.05,
+      "actual_missing_count": 250,
+      "actual_missing_pct": 5.0,
+      "output_file": "cardio_train_alco_mcar.csv",
+      "unchanged_elsewhere": true
+    },
+    {
+      "mechanism": "MAR",
+      "target_column": "ap_hi",
+      "driver_column": "age",
+      "requested_rate": 0.15,
+      "actual_missing_count": 750,
+      "actual_missing_pct": 15.0,
+      "output_file": "cardio_train_ap_hi_mar.csv",
+      "unchanged_elsewhere": true
+    },
+    {
+      "mechanism": "MAR",
+      "target_column": "gluc",
+      "driver_column": "active",
+      "requested_rate": 0.1,
+      "actual_missing_count": 500,
+      "actual_missing_pct": 10.0,
+      "output_file": "cardio_train_gluc_mar.csv",
+      "unchanged_elsewhere": true
+    },
+    {
+      "mechanism": "MNAR",
+      "target_column": "cholesterol",
+      "driver_column": null,
+      "requested_rate": 0.12,
+      "actual_missing_count": 600,
+      "actual_missing_pct": 12.0,
+      "output_file": "cardio_train_cholesterol_mnar.csv",
+      "unchanged_elsewhere": true
+    },
+    {
+      "mechanism": "MCAR",
+      "target_column": "smoke",
+      "driver_column": null,
+      "requested_rate": 0.03,
+      "actual_missing_count": 150,
+      "actual_missing_pct": 3.0,
+      "output_file": "cardio_train_smoke_mcar.csv",
+      "unchanged_elsewhere": true
+    }
+  ],
+  "combined_file": "cardio_train_corrupted_combined.csv"
+}

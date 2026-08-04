@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: dissertation-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: missingness_pipeline
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d missingness_pipeline"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:combined_app --host 0.0.0.0 --port 8000 --reload --reload-dir app/api --reload-dir app/core --reload-dir app/jobs --reload-dir app/models --reload-dir app/schemas --reload-exclude "data/*" --reload-exclude "*.csv" --reload-exclude "*.db"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/missingness_pipeline
+      WATCHFILES_FORCE_POLLING: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+      - /app/__pycache__
+
+volumes:
+  postgres_data:
