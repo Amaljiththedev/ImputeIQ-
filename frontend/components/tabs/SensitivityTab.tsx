@@ -36,83 +36,44 @@ export default function SensitivityTab() {
 
   if (!activeResults || !activeResults.dataset) return null;
 
-  const {
-    dataset,
-    diagnosis_results = [],
-    imputation_results = [],
-    sensitivity_metrics = [],
-  } = activeResults;
+  const { sensitivity_metrics = [] } = activeResults;
 
-  const rowCount = dataset.row_count || 1;
-  const diagMap = new Map(diagnosis_results.map((d) => [d.target_column, d]));
-  const impMap = new Map(imputation_results.map((i) => [i.target_column, i]));
+  // Metrics come from the backend only. There was previously a client-side
+  // fallback that synthesised these numbers from hardcoded constants (e.g.
+  // stabilityScore = 96, baselineVal = 100 - missingPct * 10) whenever the
+  // backend returned nothing. Those values were not derived from the data and
+  // were visually indistinguishable from real ones, so a missing CSV on disk
+  // silently produced fabricated statistics. If the backend has no metrics we
+  // now say so instead of inventing them.
+  const metrics: SensitivityMetric[] =
+    sensitivity_metrics.length > 0 ? sensitivity_metrics : fetchedMetrics;
 
-  // Fallback dynamic computation if backend sensitivity metrics are still loading
-  const fallbackMetrics: SensitivityMetric[] = diagnosis_results.map((diag) => {
-    const col = diag.target_column;
-    const imp = impMap.get(col);
-    const isNumeric = dataset.numeric_columns.includes(col);
-    const missingPct = diag.n_missing / rowCount;
-    const isAmbiguous = diag.diagnosed_mechanism.startsWith("Ambiguous");
-
-    let stabilityScore = 96;
-    let status: "Highly Stable" | "Robust" | "Needs Caution" = "Highly Stable";
-    let shiftPct = 0.8;
-
-    if (isAmbiguous || imp?.low_confidence) {
-      stabilityScore = 78;
-      status = "Needs Caution";
-      shiftPct = 3.4;
-    } else if (missingPct > 0.03) {
-      stabilityScore = 89;
-      status = "Robust";
-      shiftPct = 1.5;
-    }
-
-    const baselineVal = isNumeric ? `Mean: ${(100 - missingPct * 10).toFixed(1)}` : `Mode: Primary (${(60 - missingPct * 20).toFixed(0)}%)`;
-    const primaryVal = isNumeric ? `Mean: ${(100 - missingPct * 10 + shiftPct * 0.1).toFixed(1)} (±0.2%)` : `Mode: Primary (${(60 - missingPct * 18).toFixed(0)}%)`;
-    const worstCaseVal = isNumeric ? `Mean: ${(100 - missingPct * 10 - shiftPct * 1.5).toFixed(1)} (-${(shiftPct * 1.5).toFixed(1)}%)` : `Mode shifted under extreme gap clustering`;
-
-    return {
-      column: col,
-      type: isNumeric ? "numeric" : "categorical",
-      missingCount: diag.n_missing,
-      missingPct,
-      stabilityScore,
-      status,
-      baselineVal,
-      primaryVal,
-      worstCaseVal,
-      shiftPct,
-      description: isAmbiguous
-        ? `Because the missingness mechanism is ambiguous, downstream models may shift up to ±${shiftPct}% if unobserved factors drive the gaps.`
-        : `Our conditional imputation preserves subgroup variances within ±${shiftPct}% of the complete-case baseline.`,
-      scenarioNotes: {
-        mar: `Under MAR (conditional on ${diag.significant_drivers?.[0] || "observed predictors"}), group-level distributions remain unbiased and variance is fully preserved.`,
-        mcar: `If gaps were purely random (MCAR), simple mean or mode fill would yield nearly identical results with 0.2% lower standard error.`,
-        mnar: `Under extreme MNAR (worst-case assumption where missing values cluster at the tails), estimates shift by up to ±${(shiftPct * 1.8).toFixed(1)}%.`,
-      },
-    };
-  });
-
-  const metrics: SensitivityMetric[] = sensitivity_metrics.length > 0
-    ? sensitivity_metrics
-    : fetchedMetrics.length > 0
-    ? fetchedMetrics
-    : fallbackMetrics;
+  if (metrics.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="glass rounded-3xl px-10 py-12 max-w-md text-center">
+          <BarChart3 className="w-6 h-6 text-gray-500 mx-auto mb-4" strokeWidth={1.5} />
+          <h3 className="text-[17px] font-semibold text-gray-900 mb-2">
+            Sensitivity metrics unavailable
+          </h3>
+          <p className="text-[13px] text-gray-600 leading-relaxed">
+            The backend returned no metrics for this dataset. This usually means the
+            source CSV could not be read from disk. Re-run the analysis rather than
+            treating the absence as a result.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const activeMetric =
     metrics.find((m) => m.column === selectedColumn) || metrics[0] || null;
 
-  const avgStability =
-    metrics.length > 0
-      ? Math.round(metrics.reduce((acc, m) => acc + m.stabilityScore, 0) / metrics.length)
-      : 100;
+  const avgStability = Math.round(
+    metrics.reduce((acc, m) => acc + m.stabilityScore, 0) / metrics.length
+  );
 
-  const maxShift =
-    metrics.length > 0
-      ? Math.max(...metrics.map((m) => m.shiftPct)).toFixed(1)
-      : "0.0";
+  const maxShift = Math.max(...metrics.map((m) => m.shiftPct)).toFixed(1);
 
   const cautionCount = metrics.filter((m) => m.status === "Needs Caution").length;
 
@@ -127,13 +88,22 @@ export default function SensitivityTab() {
             transition={{ duration: 0.25, ease: EASE }}
             className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Overall Robustness</p>
+            <p className="text-sm text-[#6E6E73] mb-2">Mean variance retained</p>
             <div className="flex items-baseline gap-2">
               <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
                 {avgStability}%
               </p>
-              <span className="text-xs font-medium text-[#1F8A3D] bg-[#34C759]/12 px-2 py-0.5 rounded-full">
-                High
+              {/* Derived from the score rather than a fixed "High" label. */}
+              <span
+                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  avgStability >= 95
+                    ? "text-[#1F8A3D] bg-[#34C759]/12"
+                    : avgStability >= 90
+                    ? "text-[#0071E3] bg-[#0071E3]/10"
+                    : "text-[#B8791F] bg-[#FFB340]/15"
+                }`}
+              >
+                {avgStability >= 95 ? "High" : avgStability >= 90 ? "Moderate" : "Low"}
               </span>
             </div>
           </motion.div>
@@ -305,8 +275,12 @@ export default function SensitivityTab() {
                       ? "Missing Completely At Random"
                       : "Missing Not At Random (Extreme Bound)"}
                   </span>
+                  {/* The score is a property of the imputed column, not of the
+                      scenario being viewed. It previously had +4 added under
+                      MCAR and 15 subtracted under MNAR, which invented three
+                      different numbers from one measurement. */}
                   <span className="font-mono text-xs font-bold text-[#0071E3]">
-                    Score: {activeScenario === "mar" ? activeMetric.stabilityScore : activeScenario === "mcar" ? Math.min(100, activeMetric.stabilityScore + 4) : Math.max(60, activeMetric.stabilityScore - 15)}/100
+                    Variance retained: {activeMetric.stabilityScore}%
                   </span>
                 </div>
                 <p className="text-sm text-[#3A3A3C] leading-relaxed">
@@ -319,10 +293,16 @@ export default function SensitivityTab() {
             <div className="rounded-2xl border border-[#E5E5E7] p-5 space-y-3">
               <h4 className="text-sm font-semibold text-[#1D1D1F] flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-[#0071E3]" />
-                Downstream Variance Check
+                Distribution impact
               </h4>
+              {/* The previous copy claimed a bound on downstream regression
+                  coefficients. Nothing here measures that: the figure is the
+                  shift in this column's own mean. */}
               <p className="text-xs text-[#6E6E73] leading-relaxed">
-                When running regressions or clustering using <code className="font-mono font-medium text-[#1D1D1F]">{activeMetric.column}</code>, the max estimated coefficient deviation is bounded within <strong className="text-[#1D1D1F]">±{activeMetric.shiftPct}%</strong>.
+                Imputing <code className="font-mono font-medium text-[#1D1D1F]">{activeMetric.column}</code> retains{" "}
+                <strong className="text-[#1D1D1F]">{activeMetric.stabilityScore}%</strong> of its original spread and moves its
+                mean by <strong className="text-[#1D1D1F]">{activeMetric.shiftPct}%</strong>. This describes the column itself,
+                not the effect on any downstream model.
               </p>
               <div className="w-full bg-[#E8E8ED] h-2 rounded-full overflow-hidden mt-2">
                 <div
@@ -331,8 +311,8 @@ export default function SensitivityTab() {
                 />
               </div>
               <div className="flex justify-between text-[11px] text-[#8E8E93]">
-                <span>High Sensitivity (0%)</span>
-                <span>Robust Stability ({activeMetric.stabilityScore}%)</span>
+                <span>Spread collapsed (0%)</span>
+                <span>Spread preserved ({activeMetric.stabilityScore}%)</span>
               </div>
             </div>
           </div>

@@ -60,6 +60,12 @@ def _normalize_role(semantic_role) -> str:
 
 def _normalize_mechanism(diagnosed_mechanism: str) -> str:
     label = (diagnosed_mechanism or "").upper()
+    # "Undetermined (MAR or MNAR)" means MCAR was rejected but no measured
+    # driver was found. Checked before the MAR test below, which would
+    # otherwise match on the substring "MAR" and route it as confidently MAR.
+    # Treated as MNAR so it keeps the cautious, low-confidence path.
+    if "UNDETERMINED" in label:
+        return "MNAR"
     if "AMBIGUOUS" in label:
         return "MNAR"
     if "MAR" in label and "MCAR" not in label:

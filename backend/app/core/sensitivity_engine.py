@@ -81,7 +81,10 @@ def compute_column_sensitivity(
         )
 
         n_missing = int(series_orig.isna().sum())
-        missing_pct = (n_missing / row_count) if row_count > 0 else 0.0
+        # Expressed as a true percentage (0-100). This previously stored the raw
+        # fraction in a field named missingPct, so any consumer rendering it
+        # directly understated missingness by a factor of 100.
+        missing_pct = (n_missing / row_count * 100.0) if row_count > 0 else 0.0
 
         imp_item = imp_map.get(col)
         is_ambiguous = "AMBIGUOUS" in str(diag.diagnosed_mechanism).upper()
@@ -114,7 +117,7 @@ def compute_column_sensitivity(
                 "column": col,
                 "type": "identifier",
                 "missingCount": n_missing,
-                "missingPct": missing_pct,
+                "missingPct": round(missing_pct, 2),
                 "stabilityScore": 100,
                 "status": "Not Imputed (Identifier)",
                 "baselineVal": f"{n_missing} missing",
@@ -155,105 +158,157 @@ def compute_column_sensitivity(
             else:
                 primary_series = series_orig.fillna(series_clean.median() if is_numeric else series_clean.mode()[0])
 
+        # ------------------------------------------------------------------
+        # Stability is measured against what single imputation actually damages.
+        #
+        # The previous implementation compared only the MEAN before and after.
+        # Median (and mode) imputation barely moves a mean by construction, so
+        # that comparison returned near-zero for every column and the score
+        # collapsed to a constant. It reported "Robust" precisely where the
+        # distribution was being distorted most.
+        #
+        # Filling n missing values with a single constant shrinks the spread.
+        # Variance retention captures that directly, so it is the headline
+        # figure here, with the standardised mean shift as a second axis.
+        # ------------------------------------------------------------------
         if is_numeric:
-            mean_cc = float(series_clean.mean())
-            mean_sel = float(primary_series.mean())
-            if abs(mean_cc) > 1e-9:
-                shift_pct = ((mean_sel - mean_cc) / abs(mean_cc)) * 100.0
-            else:
-                shift_pct = (mean_sel - mean_cc) * 100.0
+            obs = pd.to_numeric(series_clean, errors="coerce").dropna().astype(float)
+            imp = pd.to_numeric(primary_series, errors="coerce").dropna().astype(float)
+            if obs.empty or imp.empty:
+                continue
 
-            unit = ""
-            if any(k in col.lower() for k in ("charge", "cost", "price", "revenue", "dollar")):
-                unit = "$"
-            elif any(k in col.lower() for k in ("age", "year", "duration")):
-                unit = " yrs"
+            mean_obs = float(obs.mean())
+            mean_imp = float(imp.mean())
+            sd_obs = float(obs.std(ddof=1)) if len(obs) > 1 else 0.0
+            sd_imp = float(imp.std(ddof=1)) if len(imp) > 1 else 0.0
 
-            if unit == "$":
-                baseline_str = f"Mean: ${mean_cc:,.2f}"
-                primary_str = f"Mean: ${mean_sel:,.2f} ({shift_pct:+.1f}%)"
-            elif unit == " yrs":
-                baseline_str = f"Mean: {mean_cc:.1f} yrs"
-                primary_str = f"Mean: {mean_sel:.1f} yrs ({shift_pct:+.1f}%)"
-            else:
-                baseline_str = f"Mean: {mean_cc:.2f}"
-                primary_str = f"Mean: {mean_sel:.2f} ({shift_pct:+.1f}%)"
-
-            q10 = float(series_clean.quantile(0.1))
-            q90 = float(series_clean.quantile(0.9))
-            worst_series_10 = series_orig.fillna(q10)
-            worst_series_90 = series_orig.fillna(q90)
-            mean_worst_10 = float(worst_series_10.mean())
-            mean_worst_90 = float(worst_series_90.mean())
-            shift_10 = ((mean_worst_10 - mean_cc) / abs(mean_cc)) * 100.0 if abs(mean_cc) > 1e-9 else (mean_worst_10 - mean_cc) * 100.0
-            shift_90 = ((mean_worst_90 - mean_cc) / abs(mean_cc)) * 100.0 if abs(mean_cc) > 1e-9 else (mean_worst_90 - mean_cc) * 100.0
-
-            if abs(shift_90) > abs(shift_10):
-                mean_worst = mean_worst_90
-                worst_shift = shift_90
-            else:
-                mean_worst = mean_worst_10
-                worst_shift = shift_10
-
-            if unit == "$":
-                worst_str = f"Mean: ${mean_worst:,.2f} ({worst_shift:+.1f}%)"
-            elif unit == " yrs":
-                worst_str = f"Mean: {mean_worst:.1f} yrs ({worst_shift:+.1f}%)"
-            else:
-                worst_str = f"Mean: {mean_worst:.2f} ({worst_shift:+.1f}%)"
-
+            shift_pct = ((mean_imp - mean_obs) / abs(mean_obs) * 100.0) if abs(mean_obs) > 1e-9 else 0.0
             abs_shift = abs(shift_pct)
+            # Mean shift expressed in standard deviations, so it is comparable
+            # across columns measured on different scales.
+            std_shift = (abs(mean_imp - mean_obs) / sd_obs) if sd_obs > 1e-9 else 0.0
+            var_retention = (sd_imp / sd_obs) if sd_obs > 1e-9 else 1.0
+            sd_change_pct = (var_retention - 1.0) * 100.0
+
+            baseline_str = f"Mean {mean_obs:,.2f} · SD {sd_obs:,.2f}"
+            primary_str = (
+                f"Mean {mean_imp:,.2f} ({shift_pct:+.2f}%) · SD {sd_imp:,.2f} ({sd_change_pct:+.1f}%)"
+            )
+
+            # Delta-adjusted MNAR bound. Rather than filling from the observed
+            # 10th/90th percentile (which stays inside the observed support and
+            # therefore cannot bound an MNAR departure), the missing values are
+            # shifted by one standard deviation in each direction and the larger
+            # resulting movement is reported. This is the tipping-point style
+            # adjustment CONSORT item 21c expects for MNAR scenarios.
+            if n_missing > 0 and sd_obs > 1e-9:
+                filled_hi = series_orig.fillna(mean_obs + sd_obs)
+                filled_lo = series_orig.fillna(mean_obs - sd_obs)
+                mean_hi = float(pd.to_numeric(filled_hi, errors="coerce").mean())
+                mean_lo = float(pd.to_numeric(filled_lo, errors="coerce").mean())
+                shift_hi = ((mean_hi - mean_obs) / abs(mean_obs) * 100.0) if abs(mean_obs) > 1e-9 else 0.0
+                shift_lo = ((mean_lo - mean_obs) / abs(mean_obs) * 100.0) if abs(mean_obs) > 1e-9 else 0.0
+                if abs(shift_hi) >= abs(shift_lo):
+                    worst_mean, worst_shift = mean_hi, shift_hi
+                else:
+                    worst_mean, worst_shift = mean_lo, shift_lo
+                worst_str = f"Mean {worst_mean:,.2f} ({worst_shift:+.2f}%) at δ = ±1 SD"
+            else:
+                worst_shift = 0.0
+                worst_str = "No missing values to bound"
+
+            # Score is the weaker of two fidelities, so a column cannot look
+            # healthy by doing well on one axis alone. Spread fidelity is
+            # penalised for departure from the original SD in EITHER direction:
+            # constant-fill far from the centre (zero-filling a count column,
+            # say) inflates the SD rather than shrinking it, and clipping that
+            # to 1.0 would report perfect stability alongside a large mean shift.
+            var_fidelity = max(0.0, 1.0 - abs(1.0 - var_retention))
+            mean_fidelity = max(0.0, 1.0 - min(1.0, std_shift))
+            stability_score = int(round(min(var_fidelity, mean_fidelity) * 100))
+
+            if var_fidelity >= 0.95 and std_shift < 0.10:
+                status = "Highly Stable"
+            elif var_fidelity >= 0.90 and std_shift < 0.25:
+                status = "Robust"
+            else:
+                status = "Needs Caution"
+
+            spread_word = "narrows" if var_retention < 1.0 else "widens"
+            desc = (
+                f"Imputing {n_missing:,} value(s) leaves {var_retention * 100:.1f}% of the original "
+                f"standard deviation and moves the mean by {std_shift:.2f} SD ({shift_pct:+.2f}%). "
+                f"Filling with a single constant {spread_word} the spread, so the resulting variance "
+                f"misstates the true uncertainty."
+            )
         else:
-            modes = series_clean.mode()
-            mode_cc = str(modes[0]) if not modes.empty else "Unknown"
-            pct_cc = float((series_clean == mode_cc).mean() * 100.0)
+            # Categorical: compare the full category distribution, not just the
+            # modal share. Total variation distance is bounded [0, 1] and moves
+            # whenever any category's proportion changes.
+            obs_props = series_clean.astype(str).value_counts(normalize=True)
+            imp_props = primary_series.dropna().astype(str).value_counts(normalize=True)
+            categories = set(obs_props.index) | set(imp_props.index)
+            tvd = 0.5 * sum(
+                abs(float(imp_props.get(c, 0.0)) - float(obs_props.get(c, 0.0))) for c in categories
+            )
 
-            modes_sel = primary_series.mode()
-            mode_sel = str(modes_sel[0]) if not modes_sel.empty else mode_cc
-            pct_sel = float((primary_series == mode_sel).mean() * 100.0)
+            mode_obs = str(obs_props.index[0]) if len(obs_props) else "Unknown"
+            pct_obs = float(obs_props.iloc[0] * 100.0) if len(obs_props) else 0.0
+            mode_imp = str(imp_props.index[0]) if len(imp_props) else mode_obs
+            pct_imp = float(imp_props.iloc[0] * 100.0) if len(imp_props) else pct_obs
 
-            shift_pct = pct_sel - pct_cc
-            baseline_str = f"Mode: {mode_cc} ({pct_cc:.0f}%)"
-            primary_str = f"Mode: {mode_sel} ({pct_sel:.0f}%)"
+            shift_pct = pct_imp - pct_obs
+            abs_shift = abs(shift_pct)
 
-            val_counts = series_clean.value_counts()
-            least_common = str(val_counts.index[-1]) if len(val_counts) > 1 else mode_cc
-            worst_str = f"Mode shifted to '{least_common}' if gaps cluster"
-            abs_shift = abs(shift_pct) * 0.5
+            baseline_str = f"Mode '{mode_obs}' ({pct_obs:.1f}%) · {len(obs_props)} categories"
+            primary_str = f"Mode '{mode_imp}' ({pct_imp:.1f}%) · TVD {tvd:.3f}"
 
-        stability_score = max(40, min(99, int(100.0 - (abs_shift * 4.0) - (14.0 if is_ambiguous or is_low_conf else 0.0))))
-        if stability_score >= 90:
-            status = "Highly Stable"
-        elif stability_score >= 80:
-            status = "Robust"
-        else:
-            status = "Needs Caution"
+            rarest = str(obs_props.index[-1]) if len(obs_props) > 1 else mode_obs
+            worst_share = (n_missing / row_count * 100.0) if row_count else 0.0
+            worst_str = f"'{rarest}' +{worst_share:.1f}pp if all gaps were that category"
+            worst_shift = worst_share
+
+            stability_score = int(round(max(0.0, 1.0 - tvd) * 100))
+            if tvd <= 0.02:
+                status = "Highly Stable"
+            elif tvd <= 0.05:
+                status = "Robust"
+            else:
+                status = "Needs Caution"
+
+            desc = (
+                f"Filling {n_missing:,} gap(s) with the mode shifts the category distribution by a total "
+                f"variation distance of {tvd:.3f}, raising the modal share from {pct_obs:.1f}% to "
+                f"{pct_imp:.1f}%. Mode imputation always concentrates mass on the majority category."
+            )
+
+        if is_ambiguous or is_low_conf:
+            desc += " The mechanism is uncertain, so this comparison bounds the arithmetic effect only, not the risk of bias."
 
         drivers = diag.significant_drivers or []
         driver_str = drivers[0] if drivers else "observed predictors"
 
-        if is_ambiguous:
-            desc = (
-                f"Because the missingness mechanism for '{col}' is ambiguous, downstream estimates may shift by up to "
-                f"±{abs_shift:.1f}% if unobserved factors drive the gaps."
-            )
-        else:
-            desc = (
-                f"Conditional imputation preserves distribution parameters within ±{abs_shift:.1f}% "
-                f"of the complete-case baseline."
-            )
-
         scenario_notes = {
-            "mar": f"Under MAR (conditional on {driver_str}), group-level distributions remain unbiased and variance is preserved.",
-            "mcar": "If gaps were purely random (MCAR), simple mean/mode fill would yield nearly identical results with lower standard error.",
-            "mnar": f"Under extreme MNAR (worst-case bounds where missing values cluster at distribution tails), estimates shift by up to {worst_str.split()[-1] if '(' in worst_str else 'significant margins'}.",
+            "mar": (
+                f"Under MAR the missingness is explained by {driver_str}. Estimates are recoverable only if "
+                f"the imputation conditions on that variable; an unconditional fill does not."
+            ),
+            "mcar": (
+                "Under MCAR the observed cases are a random subsample, so complete-case estimates are already "
+                "unbiased and imputation mainly recovers statistical power."
+            ),
+            "mnar": (
+                f"Under MNAR, shifting the missing values by one standard deviation moves the mean by "
+                f"{worst_shift:+.2f}%. MNAR cannot be confirmed from the observed data, so this is a "
+                f"sensitivity bound rather than an estimate."
+            ),
         }
 
         metrics.append({
             "column": col,
             "type": "numeric" if is_numeric else "categorical",
             "missingCount": n_missing,
-            "missingPct": missing_pct,
+            "missingPct": round(missing_pct, 2),
             "stabilityScore": stability_score,
             "status": status,
             "baselineVal": baseline_str,

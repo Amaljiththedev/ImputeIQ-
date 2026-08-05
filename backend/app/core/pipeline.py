@@ -108,8 +108,13 @@ def diagnose_all_columns(
             diag_mech = "MAR"
         elif diagnosis_detail.startswith("Ambiguous"):
             diag_mech = "Ambiguous (MCAR/MNAR)"
-        elif diagnosis_detail.startswith("Likely MNAR"):
-            diag_mech = "MNAR"
+        elif diagnosis_detail.startswith("Undetermined"):
+            # MCAR was rejected but no measured driver explains the gaps. The
+            # data cannot tell us whether this is MAR on an unmeasured variable
+            # or MNAR, so it is reported as undetermined rather than asserted
+            # to be MNAR. Routing is unchanged: it still takes the cautious
+            # low-confidence path.
+            diag_mech = "Undetermined (MAR or MNAR)"
         else:
             diag_mech = diagnosis_detail
 

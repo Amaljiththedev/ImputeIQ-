@@ -16,3 +16,4 @@ tenacity>=8.2.0
 python-socketio>=5.10.0
 psycopg2-binary>=2.9.0
 statsmodels>=0.14.0
+pytest>=8.0.0

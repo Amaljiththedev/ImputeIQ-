@@ -179,7 +179,16 @@ def diagnose(
 
     if littles_p is None:
         littles_p = run_littles_test(df, numeric_cols)
-    littles_suggests_mcar = littles_p > alpha
+
+    # Little's test: H0 = the data are MCAR, H1 = they are not.
+    #
+    # p > alpha means we FAILED TO REJECT H0. That is not evidence that the
+    # data are MCAR -- only that this test, with this sample size and this
+    # number of missingness patterns, detected no departure it is powered to
+    # find. The variable is named for what it actually measures. The value is
+    # still persisted under the legacy `littles_suggests_mcar` field so the
+    # API contract is unchanged.
+    littles_fails_to_reject_mcar = littles_p > alpha
 
     cat_assoc = check_categorical_associations(df, target_col, categorical_cols)
     num_assoc = check_numeric_associations(df, target_col, numeric_cols)
@@ -202,15 +211,24 @@ def diagnose(
 
     if significant_drivers:
         diagnosis = "MAR (driver(s): " + ", ".join(significant_drivers) + ")"
-    elif littles_suggests_mcar:
+    elif littles_fails_to_reject_mcar:
         diagnosis = (
-            f"Ambiguous: MCAR or MNAR (indistinguishable from observed data "
-            f"— littles_p={littles_p:.4f})"
+            f"Ambiguous: consistent with MCAR, MNAR not excluded "
+            f"(Little's test did not reject MCAR, p={littles_p:.4f})"
         )
     else:
-        diagnosis = "Likely MNAR (by elimination — no observed driver found)"
+        # Previously reported as "Likely MNAR (by elimination)". That claim is
+        # not supportable: MNAR depends on the unrecorded values, so it cannot
+        # be established from observed data at all, and finding no driver among
+        # the MEASURED variables is equally consistent with MAR driven by
+        # something that was never measured, or with a real driver this test
+        # was underpowered to detect.
+        diagnosis = (
+            f"Undetermined: MCAR rejected (Little's p={littles_p:.4f}), "
+            f"no driver found among measured variables"
+        )
 
-    return littles_p, littles_suggests_mcar, cat_assoc, num_assoc, significant_drivers, diagnosis
+    return littles_p, littles_fails_to_reject_mcar, cat_assoc, num_assoc, significant_drivers, diagnosis
 
 
 def mechanism_label(diagnosis: str) -> str:

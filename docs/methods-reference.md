@@ -48,15 +48,19 @@ covariance structure instead. It assumes multivariate normality. Power falls wit
 small samples and with many distinct patterns. It cannot distinguish MAR from
 MNAR under any circumstances.
 
-**Correction needed in the current code.** The variable `littles_suggests_mcar`
-in `diagnose_mechanism.py` is set to `littles_p > alpha`, and a failure to reject
-is then reported as being consistent with MCAR. Treating "we did not detect a
-departure" as support for the null is the standard misreading of a significance
-test, and the wording should change. The related branch that labels a column
-"Likely MNAR (by elimination — no observed driver found)" is also not defensible:
-failing to find a driver among the measured variables is equally consistent with
-MAR driven by something that was not measured, or with a real driver the test was
-underpowered to detect.
+**Corrected in the code.** The internal flag is now named
+`littles_fails_to_reject_mcar`, which is what `littles_p > alpha` actually
+measures. The value is still persisted under the original `littles_suggests_mcar`
+field so the API contract is unchanged.
+
+The branch that previously reported "Likely MNAR (by elimination — no observed
+driver found)" has been replaced. Concluding MNAR because no driver was found is
+not defensible: it is equally consistent with MAR driven by a variable that was
+never measured, or with a real driver the test was underpowered to detect. That
+case is now labelled "Undetermined: MCAR rejected, no driver found among measured
+variables" and carries the mechanism `Undetermined (MAR or MNAR)`. Routing is
+unchanged — it still takes the cautious low-confidence path — so only the claim
+being made has changed, not the imputation behaviour.
 
 ## Why MNAR cannot be confirmed from the data
 
@@ -206,6 +210,33 @@ simple method for MCAR, and retain median with a low-confidence flag for MNAR
 alongside sensitivity output. The synthetic benchmark can then be used to test the
 current routing against the proposed routing, which turns the disagreement into a
 measurable result rather than an assertion.
+
+## Measuring the effect of imputation
+
+The sensitivity output compares each column before and after imputation. It
+reports two quantities rather than one, because they fail independently.
+
+**Variance retention** is `SD_imputed / SD_observed`. Filling n gaps with a
+single constant concentrates mass at that constant and narrows the spread, which
+is the main documented cost of single imputation. Filling far from the centre
+(zero-filling a count column, for instance) widens it instead. Both are
+departures, so the score penalises deviation from 1.0 in either direction.
+
+**Standardised mean shift** is `|mean_imputed − mean_observed| / SD_observed`,
+expressed in standard deviations so it is comparable across columns on different
+scales.
+
+The reported score is the weaker of the two fidelities, so a column cannot appear
+healthy by performing well on one axis alone. An earlier version scored on mean
+shift alone; because median imputation barely moves a mean by construction, that
+returned a near-constant value for every column and reported "Robust" for columns
+whose spread had collapsed by more than 10%.
+
+**MNAR bound.** Missing values are shifted by one standard deviation in each
+direction and the larger resulting movement in the mean is reported. This is a
+delta-adjustment, or tipping-point, analysis. It replaces an earlier bound drawn
+from the observed 10th and 90th percentiles, which could not bound an MNAR
+departure because it never left the observed support.
 
 ## Describing how the synthetic missingness was created
 
