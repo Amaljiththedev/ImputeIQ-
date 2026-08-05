@@ -136,22 +136,35 @@ so other numeric columns act as predictors or context.
 
 ### Single versus multiple imputation
 
-The method labelled MICE uses scikit-learn's `IterativeImputer` with
-`sample_posterior=False`. It performs chained conditional imputation, but it
-produces one completed dataset with no draw from the posterior predictive
-distribution. It is therefore single imputation.
+`IterativeImputer` previously ran with `sample_posterior=False`. Every gap
+received the model's conditional-mean prediction, so the result was
+deterministic: two runs with different seeds produced identical values. That is
+regression imputation, not chained equations, and calling it MICE overstated what
+it did.
 
-Multiple imputation in the sense of Rubin generates several completed datasets,
-analyses each, and pools the results so that between-imputation variance is
-carried into the standard errors. The current implementation does not do this, so
-uncertainty about the imputed values is not propagated and standard errors will
-be too small.
+It now runs with `sample_posterior=True`, so each filled value is a draw from the
+posterior predictive distribution of the conditional model.
 
-This distinction should be stated explicitly in the dissertation, since CONSORT
-item 21c asks for the number of imputed datasets and the pooling method. Calling
-the current method "MICE" without qualification invites exactly the confusion the
-feedback warned about. Setting `sample_posterior=True` and running the imputer
-several times with different seeds would provide genuine multiple imputation.
+A single completed dataset still cannot express uncertainty about the values it
+invented, however well drawn. Rubin's procedure requires several:
+
+- `impute_mice_multiple(df, cols, m)` produces m completed datasets, each from a
+  different seed.
+- `pool_rubin(estimates, variances)` combines them. With `Qbar` the pooled
+  estimate, `Ubar` the within-imputation variance, `B` the between-imputation
+  variance and m the number of datasets, total variance is
+  `T = Ubar + (1 + 1/m)B`, and the fraction of missing information is
+  `(1 + 1/m)B / T`.
+
+`B` is the term single imputation cannot produce, since with one dataset there is
+nothing to vary. Reporting `T` rather than `Ubar` is what prevents standard errors
+being too small, and the test suite asserts that the pooled standard error
+exceeds the single-imputation one on the same data.
+
+For reporting under CONSORT item 21c, quote m, the pooled estimate, the total
+variance and the fraction of missing information. The downloadable CSV remains a
+single completed dataset for onward use; it should be described as one draw, not
+as the imputation result.
 
 ## Routing justification, and a problem with it
 
