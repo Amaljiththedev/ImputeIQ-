@@ -2,8 +2,8 @@
 
 import { useAppSelector, useAppDispatch } from "@/store/hooks";
 import { setActiveTab } from "@/store/slices/datasetSlice";
+import { setPhase } from "@/store/slices/jobSlice";
 import { AlertTriangle, Download } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -11,7 +11,6 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 export default function OverviewTab() {
   const { activeResults, activeDatasetId } = useAppSelector((s) => s.dataset);
   const dispatch = useAppDispatch();
-  const router = useRouter();
 
   if (!activeResults || !activeResults.dataset) return null;
 
@@ -69,42 +68,42 @@ export default function OverviewTab() {
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Columns affected</p>
-            <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+            <p className="text-sm text-gray-600 mb-2">Columns affected</p>
+            <p className="text-3xl font-semibold tabular-nums text-gray-900">
               {nAffected.toLocaleString()}
             </p>
           </motion.div>
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Confident diagnosis</p>
-            <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+            <p className="text-sm text-gray-600 mb-2">Confident diagnosis</p>
+            <p className="text-3xl font-semibold tabular-nums text-gray-900">
               {nConfident.toLocaleString()}
             </p>
           </motion.div>
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Need review</p>
-            <p className="text-3xl font-semibold tabular-nums text-[#FFB340]">
+            <p className="text-sm text-gray-600 mb-2">Need review</p>
+            <p className="text-3xl font-semibold tabular-nums text-warning">
               {nNeedReview.toLocaleString()}
             </p>
           </motion.div>
         </div>
 
         <div className="shrink-0 mb-5">
-          <h3 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+          <h3 className="text-xl font-semibold tracking-tight text-gray-900">
             Missingness Heatmap
           </h3>
-          <p className="text-sm text-[#6E6E73] mt-1.5 leading-relaxed">
+          <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
             Each row is a column, and each cell represents a slice of your data rows.{" "}
-            <span className="font-medium text-[#B8791F]">Amber</span> indicates missing values.
+            <span className="font-medium text-warning-fg">Amber</span> indicates missing values.
           </p>
         </div>
 
@@ -128,7 +127,7 @@ export default function OverviewTab() {
                 >
                   <code
                     className={`w-40 shrink-0 text-sm font-mono truncate ${
-                      pct > 0 ? "text-[#1D1D1F] font-medium" : "text-[#8E8E93]"
+                      pct > 0 ? "text-gray-900 font-medium" : "text-gray-500"
                     }`}
                     title={`${colName} (${nMissing.toLocaleString()} missing out of ${rowCount.toLocaleString()} rows)`}
                   >
@@ -138,17 +137,17 @@ export default function OverviewTab() {
                     {Array.from({ length: HEATMAP_CELLS }).map((_, i) => (
                       <div
                         key={i}
-                        className={`flex-1 rounded-[3px] transition-all duration-300 ${
+                        className={`flex-1 rounded-sm transition-all duration-300 ${
                           i < missingCells
-                            ? "bg-[#FFB340] shadow-[0_1px_2px_rgba(255,179,64,0.4)]"
-                            : "bg-[#E8E8ED]"
+                            ? "bg-warning shadow-[0_1px_2px_rgba(255,179,64,0.4)]"
+                            : "bg-gray-200"
                         }`}
                       />
                     ))}
                   </div>
                   <span
                     className={`w-12 shrink-0 text-sm text-right tabular-nums ${
-                      pct > 0 ? "font-medium text-[#B8791F]" : "text-[#AEAEB2]"
+                      pct > 0 ? "font-medium text-warning-fg" : "text-gray-400"
                     }`}
                   >
                     {pctDisplay}
@@ -160,12 +159,12 @@ export default function OverviewTab() {
         </div>
 
         <div className="flex items-center gap-6 mt-5 pt-5 shrink-0">
-          <span className="flex items-center gap-2 text-sm text-[#6E6E73]">
-            <span className="w-3 h-3 rounded-full bg-[#E8E8ED] inline-block" />
+          <span className="flex items-center gap-2 text-sm text-gray-600">
+            <span className="w-3 h-3 rounded-full bg-gray-200 inline-block" />
             Present
           </span>
-          <span className="flex items-center gap-2 text-sm text-[#6E6E73]">
-            <span className="w-3 h-3 rounded-full bg-[#FFB340] inline-block" />
+          <span className="flex items-center gap-2 text-sm text-gray-600">
+            <span className="w-3 h-3 rounded-full bg-warning inline-block" />
             Missing
           </span>
         </div>
@@ -174,10 +173,10 @@ export default function OverviewTab() {
       {/* Right column: column list + primary action */}
       <div className="glass flex flex-col rounded-3xl px-6 py-6">
         <div className="shrink-0 mb-4">
-          <h3 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+          <h3 className="text-xl font-semibold tracking-tight text-gray-900">
             Columns & Explanations
           </h3>
-          <p className="text-sm text-[#6E6E73] mt-1.5">
+          <p className="text-sm text-gray-600 mt-1.5">
             Click any column to view full diagnostic details.
           </p>
         </div>
@@ -200,28 +199,28 @@ export default function OverviewTab() {
                 whileTap={{ scale: 0.995 }}
                 transition={{ duration: 0.2, ease: EASE }}
                 onClick={() => dispatch(setActiveTab("diagnosis"))}
-                className="w-full text-left py-4 px-4 mb-2 rounded-2xl transition-colors duration-200 hover:bg-[#F5F5F7] focus:outline-none focus:ring-2 focus:ring-[#0071E3]/25"
+                className="w-full text-left py-4 px-4 mb-2 rounded-2xl transition-colors duration-200 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
               >
                 <div className="flex items-center justify-between gap-3 mb-2">
-                  <code className="text-sm font-mono font-medium text-[#1D1D1F] break-words">
+                  <code className="text-sm font-mono font-medium text-gray-900 break-words">
                     {diag.target_column}
                   </code>
                   {isAmbiguous ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFB340]/12 px-2.5 py-1 text-xs font-medium text-[#B8791F] shrink-0">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/12 px-2.5 py-1 text-xs font-medium text-warning-fg shrink-0">
                       <AlertTriangle className="w-3.5 h-3.5" />
                       Uncertain
                     </span>
                   ) : (
-                    <span className="inline-flex items-center rounded-full bg-[#34C759]/12 px-2.5 py-1 text-xs font-medium text-[#1F8A3D] shrink-0">
+                    <span className="inline-flex items-center rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success-fg shrink-0">
                       {diag.diagnosed_mechanism}
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-[#6E6E73] leading-relaxed">
+                <p className="text-sm text-gray-600 leading-relaxed">
                   {summaryText}
                 </p>
                 {imp?.low_confidence && (
-                  <p className="text-xs font-medium text-[#B8791F] mt-2.5 flex items-center gap-1.5 bg-[#FFB340]/10 py-1.5 px-2.5 rounded-full w-fit">
+                  <p className="text-xs font-medium text-warning-fg mt-2.5 flex items-center gap-1.5 bg-warning/10 py-1.5 px-2.5 rounded-full w-fit">
                     <AlertTriangle className="w-3 h-3" />
                     Review before relying on this recommendation
                   </p>
@@ -238,7 +237,7 @@ export default function OverviewTab() {
               whileTap={{ scale: 0.99 }}
               transition={{ duration: 0.2, ease: EASE }}
               href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/datasets/${activeDatasetId}/download`}
-              className="inline-flex items-center justify-center gap-2.5 bg-[#0071E3] hover:bg-[#0077ED] text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
+              className="inline-flex items-center justify-center gap-2.5 bg-blue-500 hover:bg-blue-600 text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
               download
             >
               <Download className="w-5 h-5" />
@@ -252,12 +251,15 @@ export default function OverviewTab() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.99 }}
               transition={{ duration: 0.2, ease: EASE }}
-              onClick={() => {
-                if (activeDatasetId) {
-                  router.push(`/datasets/${activeDatasetId}/approve`);
-                }
-              }}
-              className="inline-flex items-center justify-center gap-2.5 bg-[#0071E3] hover:bg-[#0077ED] text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
+              // Opens the real approval screen, which reads the diagnosis
+              // results and posts the chosen methods. This previously pushed to
+              // /datasets/[id]/approve, a prototype page that made no API calls
+              // and fell back to invented recommendations whenever imputation
+              // results were absent -- which is precisely the state this button
+              // appears in, so it always showed fabricated figures and
+              // approving there did nothing.
+              onClick={() => dispatch(setPhase("awaiting_approval"))}
+              className="inline-flex items-center justify-center gap-2.5 bg-blue-500 hover:bg-blue-600 text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
             >
               Review Recommendations →
             </motion.button>

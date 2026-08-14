@@ -6,6 +6,7 @@ across Complete Case baseline, Selected Strategy, and Worst-Case bounds.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 import pandas as pd
@@ -13,6 +14,130 @@ import numpy as np
 
 from app.models.db_models import Dataset, DiagnosisResult, ImputationResult
 from app.core.imputation_engine import IMPUTERS
+
+logger = logging.getLogger(__name__)
+
+
+def compare_imputation_strategies(
+    df: pd.DataFrame,
+    target_col: str,
+    numeric_cols: list[str],
+    methods: tuple[str, ...] = ("complete_case", "median", "mean", "pmm", "mice"),
+) -> list[dict[str, Any]]:
+    """Estimate the same quantity under several imputation strategies.
+
+    The per-column metrics elsewhere in this module describe what imputation did
+    to a column's distribution. They do not answer the question that matters for
+    a report: would the number I quote change if I had chosen differently?
+
+    Here the same estimate -- the column mean -- is recomputed under each
+    strategy, including complete-case analysis as the do-nothing baseline. If
+    the estimate is stable across all of them, a conclusion resting on it does
+    not depend on the imputation choice. If it moves, the choice is doing work
+    and must be reported, which is what CONSORT item 21c asks for.
+    """
+    from app.core.imputation_engine import IMPUTERS
+
+    observed = pd.to_numeric(df[target_col], errors="coerce")
+    n_missing = int(observed.isna().sum())
+    results: list[dict[str, Any]] = []
+
+    for method in methods:
+        try:
+            if method == "complete_case":
+                series = observed.dropna()
+            else:
+                fn = IMPUTERS.get(method)
+                if fn is None:
+                    continue
+                cols = [c for c in numeric_cols if c in df.columns] or [target_col]
+                filled = fn(df.copy(), cols)
+                series = pd.to_numeric(filled[target_col], errors="coerce").dropna()
+
+            if series.empty:
+                continue
+            results.append({
+                "strategy": method,
+                "estimate": round(float(series.mean()), 4),
+                "sd": round(float(series.std(ddof=1)), 4) if len(series) > 1 else 0.0,
+                "n": int(len(series)),
+            })
+        except Exception as exc:  # a strategy that cannot run is reported, not fatal
+            logger.warning("Strategy %s unavailable for %s: %s", method, target_col, exc)
+
+    if results:
+        estimates = [r["estimate"] for r in results]
+        spread = max(estimates) - min(estimates)
+        reference = abs(results[0]["estimate"]) or 1.0
+        for r in results:
+            r["shift_vs_complete_case_pct"] = round(
+                (r["estimate"] - results[0]["estimate"]) / reference * 100.0, 2
+            )
+        results.append({
+            "strategy": "__summary__",
+            "n_missing": n_missing,
+            "estimate_range": [round(min(estimates), 4), round(max(estimates), 4)],
+            "spread": round(spread, 4),
+            "spread_pct_of_estimate": round(spread / reference * 100.0, 2),
+        })
+    return results
+
+
+def mnar_delta_sweep(
+    df: pd.DataFrame,
+    target_col: str,
+    numeric_cols: list[str],
+    deltas: tuple[float, ...] = (-1.0, -0.5, 0.0, 0.5, 1.0),
+    method: str = "pmm",
+) -> list[dict[str, Any]]:
+    """Tipping-point analysis over assumed MNAR departures.
+
+    MNAR cannot be tested for, so the only honest treatment is to assume a range
+    of departures and report how far the estimate travels. Each missing value is
+    imputed as usual and then shifted by delta standard deviations of the
+    observed data. Delta zero is the MAR assumption the pipeline actually uses;
+    the others ask what happens if the unrecorded values were systematically
+    higher or lower than the model supposes.
+
+    A conclusion that survives the whole sweep does not depend on the MAR
+    assumption. One that does not survive it should be reported with that
+    caveat rather than as a single number.
+    """
+    from app.core.imputation_engine import IMPUTERS
+
+    observed = pd.to_numeric(df[target_col], errors="coerce")
+    obs_only = observed.dropna()
+    if obs_only.empty or observed.isna().sum() == 0:
+        return []
+
+    sd = float(obs_only.std(ddof=1)) if len(obs_only) > 1 else 0.0
+    baseline = float(obs_only.mean())
+
+    fn = IMPUTERS.get(method, IMPUTERS["median"])
+    cols = [c for c in numeric_cols if c in df.columns] or [target_col]
+    try:
+        filled = pd.to_numeric(fn(df.copy(), cols)[target_col], errors="coerce")
+    except Exception:
+        filled = observed.fillna(obs_only.median())
+
+    gaps = observed.isna()
+    out: list[dict[str, Any]] = []
+    for delta in deltas:
+        shifted = filled.copy()
+        shifted[gaps] = shifted[gaps] + delta * sd
+        est = float(shifted.mean())
+        out.append({
+            "delta_sd": delta,
+            "estimate": round(est, 4),
+            "shift_vs_observed_pct": round(
+                (est - baseline) / (abs(baseline) or 1.0) * 100.0, 2
+            ),
+            "assumption": (
+                "MAR, as routed" if delta == 0
+                else f"missing values {'higher' if delta > 0 else 'lower'} by {abs(delta)} SD"
+            ),
+        })
+    return out
 
 
 def compute_column_sensitivity(

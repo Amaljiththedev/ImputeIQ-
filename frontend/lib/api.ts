@@ -40,6 +40,15 @@ export interface PlaceholderCandidateOut {
   source?: string;
 }
 
+export interface ColumnAssumptionOut {
+  column: string;
+  assumed_meaning: string;
+  plausible_range?: string | null;
+  /** "user_dictionary" | "language_model" | "unavailable" */
+  source: string;
+  needs_review: boolean;
+}
+
 export interface ValidationProfileResponse {
   dataset_id: string;
   row_count: number;
@@ -47,6 +56,11 @@ export interface ValidationProfileResponse {
   duplicate_count: number;
   profiles: ColumnProfileOut[];
   candidates: PlaceholderCandidateOut[];
+  /** What the tool believes each column represents, and where that came from. */
+  assumptions?: ColumnAssumptionOut[];
+  has_data_dictionary?: boolean;
+  /** Plain-language statement of how placeholders are detected. */
+  detection_method?: string;
 }
 
 export interface DiagnosisResult {
@@ -191,16 +205,30 @@ export async function getValidationProfile(datasetId: string): Promise<Validatio
   return apiFetch(`/api/datasets/${datasetId}/validate`);
 }
 
+/**
+ * Attach a description of what the columns mean. Without one the tool infers a
+ * variable's meaning from its name alone, which is unreliable when names are
+ * abbreviated or misleading. Supplied descriptions take precedence.
+ */
+export async function setDataDictionary(datasetId: string, content: string): Promise<Dataset> {
+  return apiFetch(`/api/datasets/${datasetId}/dictionary`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 export async function applyValidation(
   datasetId: string,
-  replacements: Array<{ column: string; placeholder_value: any }>
+  replacements: Array<{ column: string; placeholder_value: any }>,
+  assumptionsReviewed = false
 ): Promise<JobResponse> {
   return apiFetch(`/api/datasets/${datasetId}/validate/apply`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ replacements }),
+    body: JSON.stringify({ replacements, assumptions_reviewed: assumptionsReviewed }),
   });
 }
 
@@ -285,4 +313,51 @@ export async function downloadCleanedCsv(datasetId: string, filename = "cleaned_
 
 export async function fetchSensitivityMetrics(datasetId: string): Promise<SensitivityMetric[]> {
   return apiFetch(`/api/datasets/${datasetId}/sensitivity`);
+}
+
+/**
+ * Robustness of an estimate to the missing-data assumption.
+ *
+ * Distinct from the sensitivity metrics, which describe what imputation did to
+ * a column's distribution. This asks whether a result derived from the data
+ * would change under a different imputation strategy, or under an assumed MNAR
+ * departure. It requires no ground truth, so unlike the benchmark it works on
+ * real data.
+ */
+export interface RobustnessStrategy {
+  strategy: string;
+  estimate: number;
+  sd: number;
+  n: number;
+  shift_vs_complete_case_pct?: number;
+}
+
+export interface RobustnessSweepPoint {
+  delta_sd: number;
+  estimate: number;
+  shift_vs_observed_pct: number;
+  assumption: string;
+}
+
+export interface RobustnessColumn {
+  column: string;
+  diagnosed_mechanism: string;
+  n_missing: number;
+  strategies: RobustnessStrategy[];
+  estimate_range?: [number, number] | null;
+  spread_pct_of_estimate: number;
+  mnar_sweep: RobustnessSweepPoint[];
+  robust_to_method_choice: boolean;
+  interpretation: string;
+}
+
+export interface RobustnessReport {
+  dataset_id: string;
+  columns_analysed: number;
+  method: string;
+  columns: RobustnessColumn[];
+}
+
+export async function fetchRobustness(datasetId: string): Promise<RobustnessReport> {
+  return apiFetch(`/api/datasets/${datasetId}/robustness`);
 }

@@ -1,0 +1,17 @@
+# CPRD Aurum Observation table -- field descriptions
+# Source: CPRD Aurum Data Specification v2.9 (27 April 2023), table 5.
+patid: Encrypted unique patient identifier, TEXT of 6-19 numeric characters. The last 5 characters are the practice identifier.
+consid: Linked consultation identifier. Observations need not be entered within a consultation in EMIS Web, so this is legitimately missing for many rows.
+pracid: Encrypted 5-digit practice identifier. A lookup code, not a quantity.
+obsid: Unique observation identifier and primary key of this table. TEXT, up to 19 numeric characters.
+obsdate: Date associated with the event, DD/MM/YYYY.
+enterdate: Date the event was entered into EMIS Web, DD/MM/YYYY.
+staffid: Encrypted identifier of the staff member who recorded the observation. TEXT, up to 10 numeric characters.
+parentobsid: Observation identifier of the parent observation, used to group related measurements such as systolic and diastolic blood pressure. Absent for ungrouped observations.
+medcodeid: CPRD medical code for the term selected by the GP. A lookup code, not a quantity.
+value: The measurement or test result. Only measurement-type observations carry one.
+numunitid: Unit of measurement, a lookup code from NumUnit.txt. Not a quantity.
+obstypeid: Type of observation from ObsType.txt: 1 observation, 4 diagnosis, 7 allergy, 8 family history. A lookup code.
+numrangelow: Low boundary of the normal reference range for this measurement.
+numrangehigh: High boundary of the normal reference range for this measurement.
+probobsid: Observation identifier of an associated problem. Absent unless the observation is linked to a problem.

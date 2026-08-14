@@ -149,3 +149,161 @@ def test_scores_differentiate_between_columns(tmp_path):
     ]
     scores = {m["column"]: m["stabilityScore"] for m in compute_column_sensitivity(dataset, diags, [])}
     assert scores["heavy"] < scores["light"]
+
+
+# --------------------------------------------------------------------------
+# Plausibility, fully-absent columns, and long-format strata
+# --------------------------------------------------------------------------
+
+def test_pmm_imputations_never_leave_the_observed_range():
+    """Regression test.
+
+    Chained equations sampling the unbounded normal posterior produced 453
+    negative values on a CPRD extract whose observed minimum was zero. Blood
+    pressure and BMI cannot be negative, so those were not plausible
+    imputations. Matching draws from real observed values instead.
+    """
+    from app.core.imputation_engine import impute_pmm
+    rng = np.random.default_rng(4)
+    n = 400
+    x = rng.gamma(2.0, 8.0, n) + 1.0          # strictly positive, right-skewed
+    df = pd.DataFrame({"x": x, "y": x * 0.5 + rng.normal(0, 2, n)})
+    df.loc[rng.choice(n, 160, replace=False), "x"] = np.nan
+    observed = df["x"].dropna()
+
+    out = impute_pmm(df, ["x", "y"], seed=1)
+    assert int(out["x"].isna().sum()) == 0
+    assert out["x"].min() >= observed.min()
+    assert out["x"].max() <= observed.max()
+    assert (out["x"] > 0).all(), "matching must not produce impossible values"
+
+
+@pytest.mark.parametrize("method", ["mean", "median", "mode", "knn", "mice", "pmm", "regression"])
+def test_a_fully_absent_column_does_not_crash(method):
+    """Regression test.
+
+    CPRD Aurum documents dosageid as not included in the first release, so a
+    real extract contains a 100% absent column. scikit-learn drops such columns
+    from its output, so assigning back raised "Columns must be same length as
+    key" and failed the entire approval job. There is nothing to learn from, so
+    the column must simply be left alone.
+    """
+    from app.core.imputation_engine import IMPUTERS
+    rng = np.random.default_rng(5)
+    df = pd.DataFrame({"dosageid": [np.nan] * 60, "qty": rng.normal(20, 3, 60)})
+    df.loc[:5, "qty"] = np.nan
+
+    out = IMPUTERS[method](df, ["dosageid", "qty"])
+    assert int(out["dosageid"].isna().sum()) == 60, "nothing can be inferred for it"
+    assert len(out) == 60
+
+
+def test_strata_detected_for_a_pooled_measurement_column():
+    """Long-format data keeps one value column for several measurement types.
+    Imputing it as a single variable pools quantities with no shared scale."""
+    from app.core.imputation_engine import detect_measurement_strata
+    rng = np.random.default_rng(6)
+    frames = []
+    for code, centre in [("bp", 120.0), ("bmi", 27.0), ("chol", 5.0)]:
+        frames.append(pd.DataFrame({
+            "code": code,
+            "value": rng.normal(centre, centre * 0.05, 200),
+            "other": rng.normal(0, 1, 200),
+        }))
+    df = pd.concat(frames, ignore_index=True)
+    assert detect_measurement_strata(df, "value", ["code", "other"]) == "code"
+
+
+def test_an_ordinary_predictor_is_not_mistaken_for_strata():
+    """A column that merely correlates with the target must not trigger
+    stratification; only a near-complete separation should."""
+    from app.core.imputation_engine import detect_measurement_strata
+    rng = np.random.default_rng(7)
+    grp = rng.choice(["a", "b"], 400)
+    df = pd.DataFrame({
+        "grp": grp,
+        "value": np.where(grp == "a", 10, 11) + rng.normal(0, 5, 400),
+    })
+    assert detect_measurement_strata(df, "value", ["grp"]) is None
+
+
+def test_stratified_imputation_keeps_each_group_on_its_own_scale():
+    from app.core.imputation_engine import impute_within_strata
+    rng = np.random.default_rng(8)
+    frames = []
+    for code, centre in [("inhaler", 1.0), ("tablets", 64.0)]:
+        v = rng.normal(centre, centre * 0.08, 250)
+        frames.append(pd.DataFrame({"code": code, "qty": v}))
+    df = pd.concat(frames, ignore_index=True)
+    gaps = rng.choice(len(df), 150, replace=False)
+    truth = df["qty"].copy()
+    df.loc[gaps, "qty"] = np.nan
+
+    out = impute_within_strata(df, ["qty"], stratum_col="code", method="pmm")
+    for code, centre in [("inhaler", 1.0), ("tablets", 64.0)]:
+        sel = out["code"] == code
+        filled = out.loc[sel & df["qty"].isna(), "qty"]
+        if len(filled):
+            # Imputed values must sit near their own group, not near the
+            # pooled mean of roughly 32.
+            assert abs(filled.mean() - centre) < centre * 0.35, f"{code} drifted toward the pooled mean"
+
+
+# --------------------------------------------------------------------------
+# Robustness: does the estimate survive a different assumption?
+# --------------------------------------------------------------------------
+
+def _frame_with_gaps(seed=11, n=400, missing=140):
+    rng = np.random.default_rng(seed)
+    x = rng.normal(50, 10, n)
+    df = pd.DataFrame({"x": x, "y": x * 0.4 + rng.normal(0, 3, n)})
+    df.loc[rng.choice(n, missing, replace=False), "x"] = np.nan
+    return df
+
+
+def test_strategy_comparison_includes_the_do_nothing_baseline():
+    """Complete-case analysis is the comparison that matters: it shows what the
+    estimate would be if nothing had been imputed at all."""
+    from app.core.sensitivity_engine import compare_imputation_strategies
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"])
+    names = [r["strategy"] for r in got]
+    assert "complete_case" in names
+    assert "pmm" in names
+    assert "__summary__" in names
+
+
+def test_strategy_comparison_reports_how_far_the_estimate_travels():
+    from app.core.sensitivity_engine import compare_imputation_strategies
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"])
+    summary = next(r for r in got if r["strategy"] == "__summary__")
+    lo, hi = summary["estimate_range"]
+    assert lo <= hi
+    assert summary["spread"] == pytest.approx(hi - lo, abs=1e-6)
+    assert summary["spread_pct_of_estimate"] >= 0
+
+
+def test_mnar_sweep_is_monotonic_and_centres_on_the_mar_assumption():
+    """Shifting the unobserved values upward must raise the estimate, and delta
+    zero must be the assumption the pipeline actually uses."""
+    from app.core.sensitivity_engine import mnar_delta_sweep
+    got = mnar_delta_sweep(_frame_with_gaps(), "x", ["x", "y"])
+    estimates = [g["estimate"] for g in got]
+    assert estimates == sorted(estimates), "a higher assumed value must raise the estimate"
+    centre = next(g for g in got if g["delta_sd"] == 0.0)
+    assert "MAR" in centre["assumption"]
+
+
+def test_sweep_is_empty_when_there_is_nothing_missing():
+    """With no gaps there is no assumption to vary, so no sweep is reported."""
+    from app.core.sensitivity_engine import mnar_delta_sweep
+    df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0], "y": [2.0, 4.0, 6.0, 8.0]})
+    assert mnar_delta_sweep(df, "x", ["x", "y"]) == []
+
+
+def test_robustness_is_measured_without_any_ground_truth():
+    """The point of this analysis: it needs no planted answer, so it works on a
+    real dataset where the true values are unknowable."""
+    from app.core.sensitivity_engine import compare_imputation_strategies, mnar_delta_sweep
+    df = _frame_with_gaps()
+    assert compare_imputation_strategies(df, "x", ["x", "y"])
+    assert mnar_delta_sweep(df, "x", ["x", "y"])

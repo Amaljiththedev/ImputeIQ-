@@ -17,6 +17,7 @@ function isFlagOnly(method?: string | null): boolean {
 function formatMethodName(method: string): string {
   if (method === "not_implemented") return "Not yet supported";
   const lower = method.trim().toLowerCase().replace(/[- ]/g, "_");
+  if (lower === "pmm") return "PMM";
   if (lower === "mice") return "MICE";
   if (lower === "knn") return "KNN";
   if (lower === "mean") return "Mean";
@@ -67,10 +68,10 @@ export default function ImputationTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE }}
         >
-          <h1 className="text-3xl font-semibold text-[#1D1D1F] tracking-tight">
+          <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">
             Imputation
           </h1>
-          <p className="text-sm text-[#6E6E73] mt-1.5">
+          <p className="text-sm text-gray-600 mt-1.5">
             How missing values were filled in, and why.
           </p>
         </motion.div>
@@ -79,12 +80,12 @@ export default function ImputationTab() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.05 }}
-          className="rounded-[28px] border border-white/50 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] px-10 py-16 text-center"
+          className="glass rounded-3xl px-10 py-16 text-center"
         >
-          <div className="w-12 h-12 rounded-2xl bg-[#F5F5F7] flex items-center justify-center mx-auto mb-4">
-            <HelpCircle className="w-5 h-5 text-[#AEAEB2]" strokeWidth={1.5} />
+          <div className="w-12 h-12 rounded-2xl bg-gray-100 flex items-center justify-center mx-auto mb-4">
+            <HelpCircle className="w-5 h-5 text-gray-400" strokeWidth={1.5} />
           </div>
-          <p className="text-sm text-[#6E6E73]">
+          <p className="text-sm text-gray-600">
             Imputation hasn&apos;t been run yet.
           </p>
         </motion.div>
@@ -133,10 +134,10 @@ export default function ImputationTab() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: EASE }}
       >
-        <h1 className="text-3xl font-semibold text-[#1D1D1F] tracking-tight">
+        <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">
           Imputation
         </h1>
-        <p className="text-sm text-[#6E6E73] mt-1.5">
+        <p className="text-sm text-gray-600 mt-1.5">
           How missing values were filled in, and why.
         </p>
       </motion.div>
@@ -153,10 +154,10 @@ export default function ImputationTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.03 }}
           whileHover={{ y: -2 }}
-          className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+          className="glass rounded-2xl px-6 py-5"
         >
-          <p className="text-sm text-[#6E6E73] mb-2">Values filled in</p>
-          <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+          <p className="text-sm text-gray-600 mb-2">Values filled in</p>
+          <p className="text-3xl font-semibold tabular-nums text-gray-900">
             {totalValuesFilled.toLocaleString()}
           </p>
         </motion.div>
@@ -166,10 +167,10 @@ export default function ImputationTab() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, ease: EASE, delay: 0.045 }}
             whileHover={{ y: -2 }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Structural / Flagged</p>
-            <p className="text-3xl font-semibold tabular-nums text-[#0071E3]">
+            <p className="text-sm text-gray-600 mb-2">Structural / Flagged</p>
+            <p className="text-3xl font-semibold tabular-nums text-blue-500">
               {totalFlaggedLeftNull.toLocaleString()}
             </p>
           </motion.div>
@@ -179,10 +180,10 @@ export default function ImputationTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.06 }}
           whileHover={{ y: -2 }}
-          className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+          className="glass rounded-2xl px-6 py-5"
         >
-          <p className="text-sm text-[#6E6E73] mb-2">Resolved confidently</p>
-          <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+          <p className="text-sm text-gray-600 mb-2">Resolved confidently</p>
+          <p className="text-3xl font-semibold tabular-nums text-gray-900">
             {resolvedCols.length.toLocaleString()}
           </p>
         </motion.div>
@@ -191,10 +192,10 @@ export default function ImputationTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.09 }}
           whileHover={{ y: -2 }}
-          className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+          className="glass rounded-2xl px-6 py-5"
         >
-          <p className="text-sm text-[#6E6E73] mb-2">Ambiguous, needs review</p>
-          <p className="text-3xl font-semibold tabular-nums text-[#FFB340]">
+          <p className="text-sm text-gray-600 mb-2">Ambiguous, needs review</p>
+          <p className="text-3xl font-semibold tabular-nums text-warning">
             {(lowConfidenceCols.length + notImplementedCols.length).toLocaleString()}
           </p>
         </motion.div>
@@ -205,29 +206,29 @@ export default function ImputationTab() {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: EASE, delay: 0.1 }}
-        className={`rounded-[28px] backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.04)] px-7 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 ${
+        className={`glass rounded-3xl px-7 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 ${
           notImplementedCols.length > 0
-            ? "bg-[#FFB340]/8 border border-[#FFB340]/25"
+            ? "bg-warning/8 border border-warning/25"
             : "bg-white/90 border border-white/50"
         }`}
       >
         <div className="flex items-start gap-3.5">
           <div
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-              notImplementedCols.length > 0 ? "bg-[#FFB340]/15" : "bg-[#34C759]/12"
+              notImplementedCols.length > 0 ? "bg-warning/15" : "bg-success/12"
             }`}
           >
             {notImplementedCols.length > 0 ? (
-              <AlertTriangle className="w-4.5 h-4.5 text-[#B8791F]" strokeWidth={1.75} />
+              <AlertTriangle className="w-4.5 h-4.5 text-warning-fg" strokeWidth={1.75} />
             ) : (
-              <CheckCircle2 className="w-4.5 h-4.5 text-[#1F8A3D]" strokeWidth={1.75} />
+              <CheckCircle2 className="w-4.5 h-4.5 text-success-fg" strokeWidth={1.75} />
             )}
           </div>
           <div>
-            <h2 className="text-lg font-medium text-[#1D1D1F]">
+            <h2 className="text-lg font-medium text-gray-900">
               {canDownloadAll ? "Cleaned dataset ready" : "Partial imputation completed"}
             </h2>
-            <p className="text-sm text-[#6E6E73] mt-1 leading-relaxed max-w-xl">
+            <p className="text-sm text-gray-600 mt-1 leading-relaxed max-w-xl">
               {canDownloadAll ? (
                 "All affected columns have been filled in and merged into your cleaned dataset."
               ) : notImplementedCols.length > 0 ? (
@@ -235,7 +236,7 @@ export default function ImputationTab() {
                   {notImplementedCols.length} column{notImplementedCols.length > 1 ? "s" : ""} with
                   text categories couldn&apos;t be automatically filled in yet — the download will
                   still include the remaining gaps in{" "}
-                  <span className="font-medium text-[#8A5A14]">
+                  <span className="font-medium text-warning-fg">
                     {notImplementedCols.map((c) => c.target_column).join(", ")}
                   </span>
                   .
@@ -253,7 +254,7 @@ export default function ImputationTab() {
           transition={{ duration: 0.2, ease: EASE }}
           onClick={handleDownload}
           disabled={downloading}
-          className="inline-flex items-center justify-center gap-2.5 bg-[#0071E3] hover:bg-[#0077ED] text-white text-sm font-medium px-6 py-3 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center gap-2.5 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium px-6 py-3 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Download className="w-4 h-4" />
           {downloading ? "Downloading…" : "Download cleaned CSV"}
@@ -268,10 +269,10 @@ export default function ImputationTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.12 }}
         >
-          <h2 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">
             Applied methods &amp; rationale
           </h2>
-          <p className="text-sm text-[#6E6E73] mt-1">
+          <p className="text-sm text-gray-600 mt-1">
             Columns needing a closer look are listed first.
           </p>
         </motion.div>
@@ -288,27 +289,27 @@ export default function ImputationTab() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: EASE, delay: Math.min(idx * 0.03, 0.3) }}
-                className={`rounded-[28px] border bg-white/90 backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.04)] px-6 py-5 space-y-3.5 ${
+                className={`rounded-3xl border glass px-6 py-5 space-y-3.5 ${
                   isNotImplemented
-                    ? "border-[#AEAEB2]/30"
+                    ? "border-gray-400/30"
                     : isLowConfidence
-                    ? "border-[#FFB340]/25"
+                    ? "border-warning/25"
                     : isFlag
-                    ? "border-[#0071E3]/25"
+                    ? "border-blue-500/25"
                     : "border-white/50"
                 }`}
               >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-[#F5F5F7]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-gray-100">
                   <div className="flex items-center flex-wrap gap-2.5">
-                    <span className="font-mono font-medium text-base text-[#1D1D1F] bg-[#F5F5F7] px-3 py-1.5 rounded-full">
+                    <span className="font-mono font-medium text-base text-gray-900 bg-gray-100 px-3 py-1.5 rounded-full">
                       {imp.target_column}
                     </span>
                     {imp.semantic_role && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#0071E3]/10 px-2.5 py-1 text-xs font-medium text-[#0071E3]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-500">
                         {formatSemanticRole(imp.semantic_role)}
                       </span>
                     )}
-                    <span className="text-xs font-medium text-[#8E8E93] tabular-nums">
+                    <span className="text-xs font-medium text-gray-500 tabular-nums">
                       {isFlagOnly(imp.method_used)
                         ? `${imp.n_imputed.toLocaleString()} flagged, left null`
                         : `${imp.n_imputed.toLocaleString()} values filled in`}
@@ -317,21 +318,21 @@ export default function ImputationTab() {
 
                   <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
                     {isNotImplemented ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#F5F5F7] px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
                         Not yet supported
                       </span>
                     ) : isFlag ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#0071E3]/12 px-2.5 py-1 text-xs font-medium text-[#0071E3]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/12 px-2.5 py-1 text-xs font-medium text-blue-500">
                         <CheckCircle2 className="w-3 h-3 shrink-0" />
                         {formatMethodName(imp.method_used)}
                       </span>
                     ) : isLowConfidence ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFB340]/12 px-2.5 py-1 text-xs font-medium text-[#B8791F]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/12 px-2.5 py-1 text-xs font-medium text-warning-fg">
                         <AlertTriangle className="w-3 h-3 shrink-0" />
                         {formatMethodName(imp.method_used)}
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-xs font-medium text-[#1F8A3D]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success-fg">
                         {formatMethodName(imp.method_used)}
                       </span>
                     )}
@@ -339,12 +340,12 @@ export default function ImputationTab() {
                 </div>
 
                 {isFlag ? (
-                  <p className="text-xs font-medium text-[#0071E3] flex items-center gap-1.5 bg-[#0071E3]/8 px-3 py-2 rounded-full w-fit">
+                  <p className="text-xs font-medium text-blue-500 flex items-center gap-1.5 bg-blue-500/8 px-3 py-2 rounded-full w-fit">
                     <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                     Structural handling — indicator column added, no statistical imputation needed.
                   </p>
                 ) : isLowConfidence ? (
-                  <p className="text-xs font-medium text-[#B8791F] flex items-center gap-1.5 bg-[#FFB340]/8 px-3 py-2 rounded-full w-fit">
+                  <p className="text-xs font-medium text-warning-fg flex items-center gap-1.5 bg-warning/8 px-3 py-2 rounded-full w-fit">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     This is a cautious default — see the Diagnosis tab for why the pattern was unclear.
                   </p>
@@ -353,15 +354,15 @@ export default function ImputationTab() {
                 {/* LLM-generated explanation -- kept visually distinct from
                     the method badge/status above, so it reads as the model's
                     own reasoning rather than a system-generated caption. */}
-                <div className="rounded-2xl bg-[#F5F5F7]/70 px-4 py-3.5 flex gap-3">
-                  <div className="w-6 h-6 rounded-full bg-[#0071E3]/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Sparkles className="w-3 h-3 text-[#0071E3]" strokeWidth={2} />
+                <div className="rounded-2xl bg-gray-100/70 px-4 py-3.5 flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className="w-3 h-3 text-blue-500" strokeWidth={2} />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[#8E8E93] mb-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
                       AI explanation
                     </p>
-                    <p className="text-sm text-[#3A3A3C] leading-relaxed">
+                    <p className="text-sm text-gray-700 leading-relaxed">
                       {imp.rationale}
                     </p>
                   </div>

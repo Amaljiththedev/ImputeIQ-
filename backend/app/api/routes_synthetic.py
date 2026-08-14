@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes import get_dataset_or_404
+from app.core.diagnose_mechanism import classify_mechanism
 from app.core.synthetic_missingness import (
     CARDIO_GROUND_TRUTH_PATH,
     DATA_DIR,
@@ -180,20 +181,10 @@ def get_benchmark_scorecard(
         # `gt_mech in diagnosed_mech` marked it an Exact Match against either
         # ground truth. A column the tool had explicitly failed to classify was
         # therefore scored as a correct answer, producing accuracies of 100%.
-        if "AMBIGUOUS" in diagnosed_mech or "UNDETERMINED" in diagnosed_mech:
-            diagnosed_cat = "UNRESOLVED"
-        elif "STRUCTURAL" in diagnosed_mech:
-            diagnosed_cat = "STRUCTURAL"
-        elif "IDENTIFIER" in diagnosed_mech:
-            diagnosed_cat = "IDENTIFIER"
-        elif "MNAR" in diagnosed_mech:
-            diagnosed_cat = "MNAR"
-        elif "MCAR" in diagnosed_mech:
-            diagnosed_cat = "MCAR"
-        elif "MAR" in diagnosed_mech:
-            diagnosed_cat = "MAR"
-        else:
-            diagnosed_cat = "OTHER"
+        # Both sides are mapped onto the same fixed set before comparison, so
+        # scoring never depends on wording or spelling.
+        diagnosed_cat = classify_mechanism(diagnosed_mech).value
+        gt_mech = classify_mechanism(gt_mech).value
 
         is_match = False
         match_status = "Incorrect"

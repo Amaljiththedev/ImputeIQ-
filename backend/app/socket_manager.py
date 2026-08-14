@@ -87,7 +87,7 @@ async def join_job(sid: str, data: dict):
                     has_imp = db.query(ImputationResult).filter(ImputationResult.job_id == job_id).first() is not None
                     has_diag = db.query(DiagnosisResult).filter(DiagnosisResult.job_id == job_id).first() is not None
                     if has_imp:
-                        await sio.emit("job:phase", {"phase": "explaining", "message": "Generating plain-language explanation with Gemini AI (this may take ~20-30s)…"}, room=sid)
+                        await sio.emit("job:phase", {"phase": "explaining", "message": "Generating plain-language explanation…"}, room=sid)
                     elif has_diag:
                         await sio.emit("job:phase", {"phase": "imputing", "message": "Applying imputation strategies…"}, room=sid)
                     else:

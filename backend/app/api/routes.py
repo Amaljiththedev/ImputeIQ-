@@ -12,6 +12,7 @@ API endpoints:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
@@ -43,6 +44,7 @@ from app.models.db_models import (
 from app.schemas.schemas import (
     ApplyValidationRequest,
     ApproveImputationRequest,
+    DataDictionaryRequest,
     DatasetOut,
     DatasetResultsOut,
     DiagnosisResultOut,
@@ -138,6 +140,24 @@ async def upload_dataset(
 # Data Validation Stage (NEW preprocessing & placeholder detection layer)
 # ---------------------------------------------------------------------------
 
+@router.put("/datasets/{dataset_id}/dictionary", response_model=DatasetOut)
+def set_data_dictionary(
+    request: DataDictionaryRequest,
+    dataset: Dataset = Depends(get_dataset_or_404),
+    db: Session = Depends(get_db),
+) -> Dataset:
+    """Attach a user-supplied description of what the columns mean.
+
+    Without one, the tool infers a variable's meaning from its name, which is
+    unreliable when names are abbreviated or non-obvious. A description supplied
+    here takes precedence over that inference everywhere it is used.
+    """
+    dataset.data_dictionary = request.content
+    db.commit()
+    db.refresh(dataset)
+    return dataset
+
+
 @router.get("/datasets/{dataset_id}/validate", response_model=ValidationProfileResponse)
 def get_dataset_validation_profile(
     dataset: Dataset = Depends(get_dataset_or_404),
@@ -145,9 +165,15 @@ def get_dataset_validation_profile(
 ) -> dict[str, Any]:
     """
     Profiles the raw CSV dataset and identifies suspicious placeholder candidates.
-    Queries Gemini + SQLite cache for semantic recommendations without modifying data.
+
+    Also returns, per column, the meaning the tool is working from and where that
+    came from, so the interpretation behind each placeholder decision can be
+    corrected before any data is altered. Nothing here modifies the dataset.
     """
-    return profile_and_detect_placeholders(dataset.storage_path, db, dataset.id)
+    return profile_and_detect_placeholders(
+        dataset.storage_path, db, dataset.id,
+        data_dictionary=getattr(dataset, "data_dictionary", None),
+    )
 
 
 @router.post("/datasets/{dataset_id}/validate/apply", response_model=JobOut)
@@ -347,7 +373,7 @@ def approve_and_continue_imputation(
 
 
 # ---------------------------------------------------------------------------
-# Clarify Recommendation Question via Gemini
+# Clarify Recommendation Question
 # ---------------------------------------------------------------------------
 
 @router.post("/datasets/{dataset_id}/recommend/clarify", response_model=RecommendationClarifyResponse)
@@ -477,6 +503,85 @@ def get_dataset_sensitivity(
 # ---------------------------------------------------------------------------
 # Download imputed CSV
 # ---------------------------------------------------------------------------
+
+@router.get("/datasets/{dataset_id}/robustness")
+def get_robustness_analysis(
+    dataset: Dataset = Depends(get_dataset_or_404),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """How far an estimate moves under different missing-data assumptions.
+
+    Distinct from /sensitivity, which describes what imputation did to each
+    column's distribution. This asks the question a report has to answer: would
+    the number I quote change if I had imputed differently, or if the unrecorded
+    values were systematically different from what the model assumes?
+
+    Two analyses per column. The first recomputes the estimate under several
+    strategies including complete-case, so the influence of the imputation
+    choice is visible. The second sweeps an assumed MNAR departure from -1 to
+    +1 standard deviations, since MNAR cannot be tested for and can only be
+    bounded by assumption. CONSORT item 21c asks for both.
+    """
+    import pandas as pd
+    from app.core.sensitivity_engine import compare_imputation_strategies, mnar_delta_sweep
+    from app.jobs.runner import get_dataset_csv_path
+
+    path = get_dataset_csv_path(dataset)
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="Dataset CSV not found on disk.")
+    df = pd.read_csv(path, sep=None, engine="python")
+
+    diagnoses = (
+        db.query(DiagnosisResult).filter(DiagnosisResult.dataset_id == dataset.id).all()
+    )
+    # Only continuous columns carry a numeric estimate worth moving.
+    targets = [
+        d for d in diagnoses
+        if getattr(d, "semantic_role", None) == "continuous" and d.target_column in df.columns
+    ]
+    numeric_cols = [d.target_column for d in targets]
+
+    columns = []
+    for d in targets:
+        col = d.target_column
+        strategies = compare_imputation_strategies(df, col, numeric_cols)
+        sweep = mnar_delta_sweep(df, col, numeric_cols)
+        summary = next((s for s in strategies if s.get("strategy") == "__summary__"), {})
+        spread_pct = float(summary.get("spread_pct_of_estimate") or 0.0)
+
+        columns.append({
+            "column": col,
+            "diagnosed_mechanism": d.diagnosed_mechanism,
+            "n_missing": d.n_missing,
+            "strategies": [s for s in strategies if s.get("strategy") != "__summary__"],
+            "estimate_range": summary.get("estimate_range"),
+            "spread_pct_of_estimate": spread_pct,
+            "mnar_sweep": sweep,
+            # A conclusion is only safe to state as a single number if it
+            # survives every strategy considered.
+            "robust_to_method_choice": spread_pct < 5.0,
+            "interpretation": (
+                f"The estimate moves by {spread_pct:.1f}% across imputation strategies. "
+                + (
+                    "A conclusion resting on it does not depend on which method was chosen."
+                    if spread_pct < 5.0
+                    else "The imputation choice materially affects the estimate and must be reported alongside it."
+                )
+            ),
+        })
+
+    return {
+        "dataset_id": dataset.id,
+        "columns_analysed": len(columns),
+        "method": (
+            "Each estimate is recomputed under complete-case analysis and several "
+            "imputation strategies, then under assumed MNAR departures of -1 to +1 SD. "
+            "Robustness is judged by how far the estimate travels, not by agreement "
+            "with any ground truth."
+        ),
+        "columns": columns,
+    }
+
 
 @router.get("/datasets/{dataset_id}/download")
 def download_imputed(dataset: Dataset = Depends(get_dataset_or_404), db: Session = Depends(get_db)):

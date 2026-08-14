@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from app.core.diagnose_mechanism import diagnose
+from app.core.imputation_engine import detect_measurement_strata, impute_within_strata
 from app.core.method_router import route, apply_routed_imputation
 
 # Method names that operate on ONLY the target column, never the full
@@ -100,7 +101,11 @@ def diagnose_all_columns(
             df, col, numeric_cols, categorical_cols, littles_p=shared_littles_p
         )
 
-        sz_warn = detect_structural_zero_candidate(df, col)
+        # semantic_role must be passed: detect_structural_zero_candidate skips
+        # identifier and categorical columns, but that guard was unreachable
+        # while the caller omitted the argument, so lookup-code columns such as
+        # numunitid were flagged as event counts.
+        sz_warn = detect_structural_zero_candidate(df, col, semantic_role=s_role)
 
         if sz_warn:
             diag_mech = "Structural (event count)"
@@ -156,14 +161,29 @@ def impute_all_columns(
             semantic_role=diag.semantic_role,
         )
 
-        temp_df, _ = apply_routed_imputation(
-            imputed_df,
-            col,
-            numeric_cols,
-            diag.diagnosis_detail,
-            structural_zero_warning=diag.structural_zero_warning,
-            semantic_role=diag.semantic_role,
-        )
+        # Long-format data keeps one value column for many kinds of
+        # measurement, told apart by a code column. Imputing it as a single
+        # variable pools quantities that share no scale. Where such a split is
+        # detected, each group is imputed on its own so a blood pressure is
+        # never informed by a cholesterol reading.
+        stratum = None
+        if decision.method in ("pmm", "mice", "regression", "median", "mean", "knn"):
+            candidates = [c for c in imputed_df.columns if c not in numeric_cols and c != col]
+            stratum = detect_measurement_strata(imputed_df, col, candidates)
+
+        if stratum is not None:
+            temp_df = impute_within_strata(
+                imputed_df, [col], stratum_col=stratum, method=decision.method
+            )
+        else:
+            temp_df, _ = apply_routed_imputation(
+                imputed_df,
+                col,
+                numeric_cols,
+                diag.diagnosis_detail,
+                structural_zero_warning=diag.structural_zero_warning,
+                semantic_role=diag.semantic_role,
+            )
         imputed_df[col] = temp_df[col]
 
         # flag_only produces a companion "<col>_missing" indicator column --
@@ -230,7 +250,22 @@ def impute_all_columns_with_overrides(
 
         imputer_fn = IMPUTERS[chosen_key]
         cols_to_impute = [col] if chosen_key in SINGLE_COLUMN_METHODS else numeric_cols
-        temp_df = imputer_fn(imputed_df, cols_to_impute)
+
+        # Stratify here as well as in impute_all_columns. This is the path the
+        # approval screen uses, so it is the one that actually runs for a user;
+        # applying the long-format split only to the non-override path would
+        # have left the real workflow pooling incommensurable measurements.
+        stratum = None
+        if chosen_key in ("pmm", "mice", "regression", "median", "mean", "knn"):
+            candidates = [c for c in imputed_df.columns if c not in numeric_cols and c != col]
+            stratum = detect_measurement_strata(imputed_df, col, candidates)
+
+        if stratum is not None:
+            temp_df = impute_within_strata(
+                imputed_df, [col], stratum_col=stratum, method=chosen_key
+            )
+        else:
+            temp_df = imputer_fn(imputed_df, cols_to_impute)
         imputed_df[col] = temp_df[col]
 
         flag_col = f"{col}_missing"

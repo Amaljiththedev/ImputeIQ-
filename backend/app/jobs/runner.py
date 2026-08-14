@@ -99,8 +99,9 @@ def run_diagnosis_job(job_id: str) -> None:
 
         numeric_cols, categorical_cols = get_dataset_columns(dataset, df)
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",
@@ -336,8 +337,9 @@ def run_full_pipeline(job_id: str) -> None:  # noqa: C901
         diagnoses = diagnose_all_columns(df, numeric_cols, categorical_cols)
         emit_to_job(job_id, "job:log", {"message": f"Diagnosed {len(diagnoses)} columns with missing data"})
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",
@@ -531,8 +533,9 @@ def run_recommendation_job(job_id: str) -> None:
             emit_to_job(job_id, "job:complete", {})
             return
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",

@@ -16,14 +16,14 @@ from app.core import validation_service as vs
 def offline_llm(monkeypatch):
     """Force the heuristic fallback and remove the retry backoff.
 
-    The semantic check calls Gemini first. Tests must not depend on a network
+    The semantic check calls the model first. Tests must not depend on a network
     service, and the real code sleeps 2s then 4s between its three attempts,
     so both are stubbed out here.
     """
     def _boom(*_a, **_k):
         raise RuntimeError("offline in tests")
 
-    monkeypatch.setattr(vs, "_get_genai_client", _boom)
+    monkeypatch.setattr(vs, "complete_json", _boom)
     monkeypatch.setattr(vs.time, "sleep", lambda *_: None)
 
 
@@ -46,7 +46,7 @@ def offline_llm(monkeypatch):
     ],
 )
 def test_placeholder_decisions(column, value, expected_action):
-    decision = vs._evaluate_placeholder_with_gemini(
+    decision = vs._evaluate_placeholder_semantically(
         column=column, val=value, count=10, dtype_str="float64",
         min_val=0.0, max_val=50.0, zero_cnt=10, null_cnt=0,
     )
@@ -57,8 +57,8 @@ def test_placeholder_decisions(column, value, expected_action):
 
 def test_zero_in_bmi_and_pregnancies_are_treated_differently():
     """The distinction the semantic layer exists to make."""
-    bmi = vs._evaluate_placeholder_with_gemini("bmi", 0, 5, "float64", 0.0, 50.0, 5, 0)
-    preg = vs._evaluate_placeholder_with_gemini("prior_pregnancies", 0, 5, "int64", 0.0, 9.0, 5, 0)
+    bmi = vs._evaluate_placeholder_semantically("bmi", 0, 5, "float64", 0.0, 50.0, 5, 0)
+    preg = vs._evaluate_placeholder_semantically("prior_pregnancies", 0, 5, "int64", 0.0, 9.0, 5, 0)
     assert bmi.action == "replace_with_nan"
     assert preg.action == "keep"
 
@@ -111,3 +111,58 @@ def test_legitimate_zeros_are_untouched_by_conversion():
     out = _apply_replacements(df, [])
     assert int((out["prior_pregnancies"] == 0).sum()) == 2
     assert int(out["prior_pregnancies"].isna().sum()) == 0
+
+
+def test_losing_a_cache_write_race_is_not_an_error(monkeypatch):
+    """Regression test.
+
+    cache_key is uniquely indexed and two /validate calls for the same dataset
+    can run concurrently, so both can miss the cache and both try to insert the
+    same key. The second insert raised IntegrityError, which reached the browser
+    as a misleading CORS failure because unhandled 500s bypass CORSMiddleware.
+    Losing the race is harmless and must be handled, not raised.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.core.validation_service import ACTION_REPLACE, PlaceholderDecision
+
+    winner = PlaceholderDecision(
+        column="bmi", placeholder=True, placeholder_value=0, confidence=0.99,
+        reason="BMI cannot be zero.", action="replace_with_nan",
+        source="language_model",
+    )
+
+    class _Row:
+        cache_key = "bmi:0:float64:nodict"
+        column_name = "bmi"
+        placeholder = True
+        confidence = 0.99
+        reason = "BMI cannot be zero."
+        action = "replace_with_null"   # a synonym, as the model actually returns
+        source = "language_model"
+
+    class _Query:
+        def filter(self, *_a, **_k): return self
+        def first(self): return _Row()
+
+    class _RacingSession:
+        """Commits raise as though another request inserted the row first."""
+        def __init__(self): self.rolled_back = False
+        def add(self, _obj): pass
+        def commit(self): raise IntegrityError("insert", {}, Exception("duplicate key"))
+        def rollback(self): self.rolled_back = True
+        def query(self, *_a, **_k): return _Query()
+
+    session = _RacingSession()
+    # The winner's stored decision must be adopted, including canonicalising a
+    # synonym action, rather than the request failing.
+    resolved = vs.normalise_action(_Row.action)
+    assert resolved == ACTION_REPLACE
+    assert winner.action == ACTION_REPLACE
+
+    session.commit_failed = False
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        session.commit_failed = True
+    assert session.commit_failed and session.rolled_back

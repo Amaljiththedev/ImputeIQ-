@@ -45,10 +45,45 @@ def test_structural_zero_applies_to_continuous_columns():
 
 @pytest.mark.parametrize(
     "mechanism,expected_method",
-    [("MCAR", "mice"), ("MAR", "median"), ("MNAR", "median")],
+    [("MCAR", "pmm"), ("MAR", "pmm"), ("MNAR", "median")],
 )
 def test_continuous_mechanism_routing(mechanism, expected_method):
     assert route(mechanism, semantic_role="continuous").method == expected_method
+
+
+def test_mar_uses_the_conditional_model_not_an_unconditional_fill():
+    """Regression test.
+
+    MAR was routed to median. Median is unbiased only under MCAR (van Buuren
+    2018, Table 1.1), so under MAR it biased the mean, the regression weights
+    and the correlations -- in exactly the case where the diagnosis step had
+    already named the observed driver that should have been conditioned on.
+    """
+    d = route("MAR (driver(s): smoking_status)", semantic_role="continuous")
+    # Predictive mean matching: the stochastic regression row of Table 1.1,
+    # drawing each imputation from an observed value so it cannot leave the
+    # observed range. Sampling the posterior directly produced negative
+    # clinical measurements on real data.
+    assert d.method == "pmm"
+    assert d.mechanism == "MAR"
+    assert d.low_confidence is False
+
+
+def test_mnar_keeps_a_transparent_baseline_and_stays_flagged():
+    """No method is valid under MNAR, so the cautious path is retained rather
+    than implying the conditional model has solved it."""
+    d = route("MNAR", semantic_role="continuous")
+    assert d.method == "median"
+    assert d.low_confidence is True
+
+
+def test_routing_rationale_is_sourced_rather_than_asserted():
+    """The MAR rationale previously claimed empirical equivalence with MICE and
+    cited nothing. Any rationale that makes a comparative claim must name a
+    source."""
+    for mechanism in ("MCAR", "MAR"):
+        r = route(mechanism, semantic_role="continuous").rationale
+        assert "van Buuren" in r, f"{mechanism} rationale cites no source"
 
 
 def test_unresolved_mechanisms_take_the_cautious_path():
@@ -139,3 +174,52 @@ def test_littles_flag_reports_failure_to_reject_not_confirmation():
 
     p, fails_to_reject, *_ = diagnose(df, "a", ["a", "b"], [])
     assert fails_to_reject == (p > 0.05)
+
+
+# --------------------------------------------------------------------------
+# Mechanism classes used for benchmark scoring
+# --------------------------------------------------------------------------
+
+def test_compound_labels_resolve_to_unresolved_not_a_mechanism():
+    """Regression test, and the reason a fixed class set was introduced.
+
+    "Ambiguous (MCAR/MNAR)" contains both "MCAR" and "MNAR" as substrings, so
+    free-text comparison scored a column the tool had failed to classify as a
+    correct answer against either ground truth. That produced accuracies of
+    100%.
+    """
+    from app.core.diagnose_mechanism import MechanismClass, classify_mechanism
+    for label in [
+        "Ambiguous (MCAR/MNAR)",
+        "Ambiguous: consistent with MCAR, MNAR not excluded (p=0.67)",
+        "Undetermined (MAR or MNAR)",
+        "Undetermined: MCAR rejected, no driver found among measured variables",
+    ]:
+        assert classify_mechanism(label) is MechanismClass.UNRESOLVED, label
+
+
+@pytest.mark.parametrize("label,expected", [
+    ("MAR", "MAR"),
+    ("MAR (driver(s): smoking_status)", "MAR"),
+    ("MCAR", "MCAR"),
+    ("MNAR", "MNAR"),
+    ("Structural (event count)", "STRUCTURAL"),
+    ("Identifier (key/ID)", "IDENTIFIER"),
+])
+def test_confident_labels_map_to_their_mechanism(label, expected):
+    from app.core.diagnose_mechanism import classify_mechanism
+    assert classify_mechanism(label).value == expected
+
+
+@pytest.mark.parametrize("label", ["mar", "  MAR  ", "Mar (driver(s): sex)"])
+def test_classification_is_insensitive_to_case_and_spacing(label):
+    """Comparing fixed classes also removes match failures caused purely by
+    differences in wording or spelling."""
+    from app.core.diagnose_mechanism import MechanismClass, classify_mechanism
+    assert classify_mechanism(label) is MechanismClass.MAR
+
+
+@pytest.mark.parametrize("label", [None, "", "   ", "something else entirely"])
+def test_unrecognised_labels_are_other_not_silently_a_mechanism(label):
+    from app.core.diagnose_mechanism import MechanismClass, classify_mechanism
+    assert classify_mechanism(label) is MechanismClass.OTHER
