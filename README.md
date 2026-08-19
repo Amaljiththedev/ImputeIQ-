@@ -160,6 +160,90 @@ python scripts/test_llm_explainer.py
 
 ---
 
+## ⚠️ Known Limitations
+
+These are stated here rather than left to be discovered. Each is a real constraint on how
+far the output can be trusted.
+
+### The reported uncertainty does not include imputation uncertainty
+
+The headline output is a **single imputed dataset**. Filling a gap is an estimate, and
+estimates carry error, so a standard deviation computed from an imputed column is narrower
+than the truth: it treats filled values as though they were measured.
+
+Rubin's rules for pooling across multiple imputations are implemented
+(`pool_rubin`, `impute_mice_multiple` and `pool_column_mean` in
+`backend/app/core/imputation_engine.py`) but are **not wired into the main pipeline**.
+Connecting them is the single most valuable next change.
+
+Until then: treat point estimates from imputed columns as indicative, and use the
+robustness panel rather than the point estimate when a conclusion matters.
+
+### Rows are treated as independent
+
+Every statistical test assumes one row is one independent observation. Clinical extracts
+routinely break this — CPRD Aurum is long-format, so one patient contributes many rows, and
+a synthetic extract generated here shows a weight ICC of 0.99 across repeat visits.
+
+Where rows are clustered, the effective sample size is smaller than the row count, so
+p-values from the diagnosis step are **anti-conservative**: a mechanism may be reported as
+MAR on evidence that would not survive accounting for the clustering. Treat diagnoses on
+repeated-measures data as weaker than they appear.
+
+### MNAR cannot be diagnosed, only suspected
+
+No method can distinguish MNAR from MAR using observed data alone; it is not a gap in this
+tool but a property of the problem. Columns where MCAR is rejected and no measured variable
+explains the gaps are reported as **"Undetermined (MAR or MNAR)"** and routed cautiously
+with a low-confidence flag, rather than being assigned a mechanism the data cannot support.
+The delta sweep in the sensitivity module exists to bound what this uncertainty could do to
+a result.
+
+### Structurally absent values are not missing data
+
+A blank is not always a gap. In CPRD Aurum, `value` is empty for observations that carry no
+numeric reading — a diagnosis or a family-history code — and `parentobsid` is empty whenever
+an observation is not part of a panel. Nothing was lost; there was never a value to record.
+
+Counting these as missing **overstates missingness**, sometimes severely: on one synthetic
+extract `value` was reported as 42.6% missing when the true figure among rows that could
+hold a reading was 8.5%.
+
+The tool does not yet separate the two automatically. Where a rule is known — for example
+"`value` applies only when `obstypeid` is 1" — the recommended handling is to **re-code the
+variable with the absent category named explicitly** (for example `not_applicable`) rather
+than leaving it blank, so that downstream analysis treats it as a category rather than as a
+gap to be filled. Imputation within measurement strata will decline to fill such rows in any
+case, and reports `n_unimputable` with the reason.
+
+### Not implemented from the original specification
+
+- **MissForest** — named as a baseline comparison; not implemented, so the method comparison
+  is narrower than proposed.
+- **Ranked recommendations** — one recommendation is returned per column rather than a
+  ranked list.
+- **Downstream-task context** — the intended analysis (regression, classification,
+  clustering) is not collected, so explanations are not tailored to it.
+- **GAIN / deep generative imputation** and a **PDF/HTML report** were optional extensions
+  and were not reached.
+
+### Provider deviation
+
+The specification named the Gemini API; the implementation uses Groq. This was the
+documented contingency for API rate limits. The provider sits behind a single interface
+(`backend/app/core/llm_client.py`), so the change affected one module.
+
+### Explanation text is model-generated
+
+Column explanations are written by a language model from the structured diagnostic output.
+The numbers in them are supplied by the pipeline, not derived by the model, and the output
+is rejected and retried if it contains a placeholder where a figure belongs. If the provider
+is unreachable after retries, deterministic template text is used instead and the result is
+labelled `template_fallback` in the interface — model output and template output are never
+presented identically.
+
+---
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

@@ -88,6 +88,10 @@ class ImputationResultOut(BaseModel):
     low_confidence: bool
     rationale: str
     n_imputed: int
+    # Cells left missing on purpose, and the reason. Without these the download
+    # can contain gaps the report gives no account of.
+    n_unimputable: int | None = 0
+    unimputable_reason: str | None = None
     imputed_file_path: str
     # FIX: same gap as DiagnosisResultOut -- semantic_role must be exposed
     # here too, otherwise the imputation report can't show the user why a
@@ -155,7 +159,7 @@ class ColumnProfileOut(BaseModel):
 
 
 class PlaceholderCandidateOut(BaseModel):
-    """Suspicious placeholder detected along with Gemini semantic recommendation."""
+    """Suspicious placeholder detected, with the model's semantic recommendation."""
     column: str
     placeholder_value: Any
     count: int
@@ -166,6 +170,21 @@ class PlaceholderCandidateOut(BaseModel):
     action: str  # "replace_with_nan" or "keep"
 
 
+class ColumnAssumptionOut(BaseModel):
+    """What the tool believes a variable represents, surfaced for approval.
+
+    Placeholder decisions depend on what a column is taken to mean, and a
+    column name can be misleading. Rather than acting on that interpretation
+    silently, it is stated per variable so the user can correct it before any
+    data is changed.
+    """
+    column: str
+    assumed_meaning: str
+    plausible_range: str | None = None
+    source: str  # "user_dictionary" | "language_model" | "unavailable"
+    needs_review: bool
+
+
 class ValidationProfileResponse(BaseModel):
     """Response returned when validating/profiling an uploaded dataset before diagnosis."""
     dataset_id: str
@@ -174,6 +193,9 @@ class ValidationProfileResponse(BaseModel):
     duplicate_count: int
     profiles: list[ColumnProfileOut]
     candidates: list[PlaceholderCandidateOut]
+    assumptions: list[ColumnAssumptionOut] = []
+    has_data_dictionary: bool = False
+    detection_method: str = ""
 
 
 class ValidationReplacementItem(BaseModel):
@@ -185,3 +207,15 @@ class ValidationReplacementItem(BaseModel):
 class ApplyValidationRequest(BaseModel):
     """User submission of approved placeholder-to-NaN conversions prior to diagnosis."""
     replacements: list[ValidationReplacementItem] = []
+    assumptions_reviewed: bool = False
+
+
+class DataDictionaryRequest(BaseModel):
+    """A user-supplied description of what the columns mean.
+
+    Free text, one column per line as `column: description`, or JSON mapping
+    column names to descriptions. Supplying this replaces the tool's own
+    guess at a variable's meaning, which is otherwise inferred from the column
+    name and its statistics alone.
+    """
+    content: str

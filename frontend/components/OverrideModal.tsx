@@ -11,7 +11,7 @@ export default function OverrideModal({ columnName, onClose, onApply }: Override
   const [selected, setSelected] = useState<string>("not_sure");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="glass-scrim fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-lg font-display font-semibold text-gray-900">Provide Context for {columnName}</h3>

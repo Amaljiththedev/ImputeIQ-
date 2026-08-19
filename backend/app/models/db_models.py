@@ -75,6 +75,9 @@ class Dataset(Base):
     categorical_columns = Column(JSON, nullable=False)  # list[str]
     uploaded_at = Column(DateTime(timezone=True), default=_now)
     validated_storage_path = Column(String, nullable=True)  # Optional path where preprocessed copy with converted placeholders is stored
+    # User-supplied description of what the columns mean. Overrides the tool's
+    # own inference, which otherwise rests on the column name alone.
+    data_dictionary = Column(Text, nullable=True)
 
     jobs = relationship("Job", back_populates="dataset", cascade="all, delete-orphan")
     diagnosis_results = relationship(
@@ -144,6 +147,13 @@ class ImputationResult(Base):
     rationale = Column(Text, nullable=False)
     semantic_role = Column(String, nullable=True)  # "identifier" | "categorical" | "continuous"
     n_imputed = Column(Integer, nullable=False)
+    # Cells the method declined to fill, and why. Imputation within measurement
+    # strata has no donor for a stratum where nothing was ever observed, and
+    # borrowing one would invent a value on a scale never seen for that
+    # measurement. Leaving those missing is correct; saying nothing about it
+    # is not, since the download then has gaps with no explanation.
+    n_unimputable = Column(Integer, nullable=True, default=0)
+    unimputable_reason = Column(Text, nullable=True)
     imputed_file_path = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_now)
 
@@ -157,7 +167,7 @@ class ExplanationResultRow(Base):
     job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
     dataset_id = Column(String, ForeignKey("datasets.id"), nullable=False, index=True)
 
-    generated_by = Column(String, nullable=False)  # "gemini" | "template_fallback"
+    generated_by = Column(String, nullable=False)  # "language_model" | "template_fallback"
     overall_summary = Column(Text, nullable=False)
     columns_json = Column(JSON, nullable=False)  # list[dict]
     created_at = Column(DateTime(timezone=True), default=_now)
@@ -167,9 +177,9 @@ class ExplanationResultRow(Base):
 
 class ValidationDecisionCache(Base):
     """
-    Caches Gemini semantic validation decisions for column placeholder values.
+    Caches semantic validation decisions for column placeholder values.
     Ensures repeated uploads or columns across healthcare/finance datasets instantly
-    reuse stored decisions without calling Gemini twice.
+    reuse stored decisions without a second model call.
     """
     __tablename__ = "validation_decision_cache"
 
@@ -181,5 +191,5 @@ class ValidationDecisionCache(Base):
     confidence = Column(Float, nullable=False)
     reason = Column(Text, nullable=False)
     action = Column(String, nullable=False)  # "replace_with_nan" | "keep"
-    source = Column(String, nullable=False, default="gemini")  # "gemini" | "heuristic_fallback"
+    source = Column(String, nullable=False, default="language_model")  # "language_model" | "heuristic_fallback"
     created_at = Column(DateTime(timezone=True), default=_now)

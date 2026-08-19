@@ -92,13 +92,13 @@ export default function DiagnosisTab() {
 
   // Helper to get color intensity for matrix cell
   const getCellColor = (val: number, isDiagonal: boolean) => {
-    if (isDiagonal) return "bg-[#F5F5F7] text-[#AEAEB2] font-normal";
+    if (isDiagonal) return "bg-gray-100 text-gray-400 font-normal";
     const abs = Math.abs(val);
-    if (abs < 0.05) return "bg-[#F5F5F7] text-[#6E6E73]";
-    if (abs < 0.15) return "bg-[#FFB340]/10 text-[#B8791F] border border-[#FFB340]/20";
-    if (abs < 0.3) return "bg-[#FFB340]/25 text-[#8A5A14] font-medium";
-    if (abs < 0.5) return "bg-[#FFB340]/60 text-[#5C3A0D] font-semibold";
-    return "bg-[#FFB340] text-white font-semibold shadow-[0_2px_6px_rgba(255,179,64,0.35)]";
+    if (abs < 0.05) return "bg-gray-100 text-gray-600";
+    if (abs < 0.15) return "bg-warning/10 text-warning-fg border border-warning/20";
+    if (abs < 0.3) return "bg-warning/25 text-warning-fg font-medium";
+    if (abs < 0.5) return "bg-warning/60 text-warning-fg font-semibold";
+    return "bg-warning text-white font-semibold shadow-[0_2px_6px_rgba(255,179,64,0.35)]";
   };
 
   return (
@@ -109,10 +109,10 @@ export default function DiagnosisTab() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: EASE }}
       >
-        <h1 className="text-3xl font-semibold text-[#1D1D1F] tracking-tight">
+        <h1 className="text-3xl font-semibold text-gray-900 tracking-tight">
           Diagnosis
         </h1>
-        <p className="text-sm text-[#6E6E73] mt-1.5">
+        <p className="text-sm text-gray-600 mt-1.5">
           Full statistical detail behind each column&apos;s missingness classification.
         </p>
       </motion.div>
@@ -125,10 +125,10 @@ export default function DiagnosisTab() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, ease: EASE, delay: 0.1 }}
         >
-          <h2 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">
             Per-column statistical breakdown
           </h2>
-          <p className="text-sm text-[#6E6E73] mt-1">
+          <p className="text-sm text-gray-600 mt-1">
             Columns needing review are listed first.
           </p>
         </motion.div>
@@ -147,48 +147,48 @@ export default function DiagnosisTab() {
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3, ease: EASE, delay: Math.min(idx * 0.03, 0.3) }}
-                className={`rounded-[28px] border bg-white/90 backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.04)] overflow-hidden ${
-                  isAmbiguous ? "border-[#FFB340]/25" : "border-white/50"
+                className={`glass rounded-3xl overflow-hidden ${
+                  isAmbiguous ? "border-warning/25" : "border-white/50"
                 }`}
               >
                 {/* Header row (always visible, click to toggle) */}
                 <button
                   type="button"
                   onClick={() => toggleExpand(diag.id)}
-                  className="w-full px-6 py-5 flex items-center justify-between gap-4 hover:bg-[#F5F5F7]/60 transition-colors duration-200 text-left outline-none"
+                  className="w-full px-6 py-5 flex items-center justify-between gap-4 hover:bg-gray-100/60 transition-colors duration-200 text-left outline-none"
                 >
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-medium font-mono text-base text-[#1D1D1F] bg-[#F5F5F7] px-3 py-1.5 rounded-full">
+                    <span className="font-medium font-mono text-base text-gray-900 bg-gray-100 px-3 py-1.5 rounded-full">
                       {diag.target_column}
                     </span>
 
                     {diag.semantic_role && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#0071E3]/10 px-2.5 py-1 text-xs font-medium text-[#0071E3]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-500">
                         {formatSemanticRole(diag.semantic_role)}
                       </span>
                     )}
 
                     {isAmbiguous ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFB340]/12 px-2.5 py-1 text-xs font-medium text-[#B8791F]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/12 px-2.5 py-1 text-xs font-medium text-warning-fg">
                         <AlertTriangle className="w-3 h-3 shrink-0" />
                         Uncertain
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-xs font-medium text-[#1F8A3D]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success-fg">
                         {diag.diagnosed_mechanism}
                       </span>
                     )}
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-xs font-medium text-[#8E8E93] tabular-nums">
+                    <span className="text-xs font-medium text-gray-500 tabular-nums">
                       {diag.n_missing.toLocaleString()} missing
                     </span>
                     <motion.span
                       animate={{ rotate: isExpanded ? 180 : 0 }}
                       transition={{ duration: 0.25, ease: EASE }}
                     >
-                      <ChevronDown className="w-4 h-4 text-[#AEAEB2]" />
+                      <ChevronDown className="w-4 h-4 text-gray-400" />
                     </motion.span>
                   </div>
                 </button>
@@ -207,42 +207,42 @@ export default function DiagnosisTab() {
                       <div className="px-6 pb-7 pt-4 space-y-6">
                         {/* Diagnosis detail verbatim */}
                         <div className="space-y-2">
-                          <p className="text-xs font-medium text-[#AEAEB2] uppercase tracking-wider">
+                          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Diagnosis detail
                           </p>
-                          <div className="bg-[#F5F5F7]/70 p-4 rounded-2xl font-mono text-xs sm:text-sm text-[#3A3A3C] leading-relaxed break-words">
+                          <div className="bg-gray-100/70 p-4 rounded-2xl font-mono text-xs sm:text-sm text-gray-700 leading-relaxed break-words">
                             {diag.diagnosis_detail}
                           </div>
                         </div>
 
                         {/* Little's MCAR test */}
                         <div className="space-y-2">
-                          <p className="text-xs font-medium text-[#AEAEB2] uppercase tracking-wider">
+                          <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                             Little&apos;s MCAR test
                           </p>
-                          <div className="bg-[#F5F5F7]/70 px-4 py-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <span className="font-mono text-xs sm:text-sm text-[#3A3A3C]">
+                          <div className="bg-gray-100/70 px-4 py-3.5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="font-mono text-xs sm:text-sm text-gray-700">
                               p-value:{" "}
-                              <strong className="font-semibold text-[#1D1D1F] tabular-nums">
+                              <strong className="font-semibold text-gray-900 tabular-nums">
                                 {diag.littles_p_value !== undefined && diag.littles_p_value !== null
                                   ? diag.littles_p_value.toFixed(4)
                                   : "N/A"}
                               </strong>
                             </span>
                             <div className="flex items-center gap-2">
-                              <span className="text-xs text-[#8E8E93]">Verdict:</span>
+                              <span className="text-xs text-gray-500">Verdict:</span>
                               {diag.littles_p_value !== undefined && diag.littles_p_value !== null ? (
                                 diag.littles_suggests_mcar ? (
-                                  <span className="inline-flex items-center gap-1 bg-white text-[#3A3A3C] px-2.5 py-1 rounded-full text-xs font-medium shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+                                  <span className="inline-flex items-center gap-1 bg-white text-gray-700 px-2.5 py-1 rounded-full text-xs font-medium shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
                                     Suggests MCAR
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 bg-[#FFB340]/15 text-[#8A5A14] px-2.5 py-1 rounded-full text-xs font-medium">
+                                  <span className="inline-flex items-center gap-1 bg-warning/15 text-warning-fg px-2.5 py-1 rounded-full text-xs font-medium">
                                     Rejects MCAR
                                   </span>
                                 )
                               ) : (
-                                <span className="inline-flex items-center gap-1 bg-[#F5F5F7] text-[#8E8E93] px-2.5 py-1 rounded-full text-xs font-medium">
+                                <span className="inline-flex items-center gap-1 bg-gray-100 text-gray-500 px-2.5 py-1 rounded-full text-xs font-medium">
                                   Skipped (Identifier / Role-based)
                                 </span>
                               )}
@@ -254,12 +254,12 @@ export default function DiagnosisTab() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           {/* Categorical associations */}
                           <div className="space-y-2">
-                            <p className="text-xs font-medium text-[#AEAEB2] uppercase tracking-wider">
+                            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                               Categorical associations
                             </p>
-                            <div className="bg-[#F5F5F7]/70 rounded-2xl overflow-hidden">
+                            <div className="bg-gray-100/70 rounded-2xl overflow-hidden">
                               {catEntries.length === 0 ? (
-                                <p className="p-4 text-xs text-[#AEAEB2] italic">
+                                <p className="p-4 text-xs text-gray-400 italic">
                                   No categorical columns available for comparison
                                 </p>
                               ) : (
@@ -271,19 +271,19 @@ export default function DiagnosisTab() {
                                         key={colName}
                                         className={`px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm transition-colors duration-200 ${
                                           isDriver
-                                            ? "bg-[#0071E3]/8 text-[#0A3D74] font-medium"
-                                            : "text-[#3A3A3C] hover:bg-white/60"
+                                            ? "bg-blue-500/8 text-blue-700 font-medium"
+                                            : "text-gray-700 hover:bg-white/60"
                                         }`}
                                       >
                                         <div className="flex items-center gap-2 truncate pr-2">
                                           <span className="font-mono truncate">{colName}</span>
                                           {isDriver && (
-                                            <span className="bg-[#0071E3] text-white text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full tracking-wider shrink-0">
+                                            <span className="bg-blue-500 text-white text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full tracking-wider shrink-0">
                                               Driver
                                             </span>
                                           )}
                                         </div>
-                                        <span className="font-mono text-[#3A3A3C] shrink-0 tabular-nums">
+                                        <span className="font-mono text-gray-700 shrink-0 tabular-nums">
                                           {typeof pVal === "number" ? pVal.toFixed(4) : (pVal ?? "N/A")}
                                         </span>
                                       </div>
@@ -296,12 +296,12 @@ export default function DiagnosisTab() {
 
                           {/* Numeric associations */}
                           <div className="space-y-2">
-                            <p className="text-xs font-medium text-[#AEAEB2] uppercase tracking-wider">
+                            <p className="text-xs font-medium text-gray-400 uppercase tracking-wider">
                               Numeric associations
                             </p>
-                            <div className="bg-[#F5F5F7]/70 rounded-2xl overflow-hidden">
+                            <div className="bg-gray-100/70 rounded-2xl overflow-hidden">
                               {numEntries.length === 0 ? (
-                                <p className="p-4 text-xs text-[#AEAEB2] italic">
+                                <p className="p-4 text-xs text-gray-400 italic">
                                   No numeric columns available for comparison
                                 </p>
                               ) : (
@@ -313,19 +313,19 @@ export default function DiagnosisTab() {
                                         key={colName}
                                         className={`px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm transition-colors duration-200 ${
                                           isDriver
-                                            ? "bg-[#0071E3]/8 text-[#0A3D74] font-medium"
-                                            : "text-[#3A3A3C] hover:bg-white/60"
+                                            ? "bg-blue-500/8 text-blue-700 font-medium"
+                                            : "text-gray-700 hover:bg-white/60"
                                         }`}
                                       >
                                         <div className="flex items-center gap-2 truncate pr-2">
                                           <span className="font-mono truncate">{colName}</span>
                                           {isDriver && (
-                                            <span className="bg-[#0071E3] text-white text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full tracking-wider shrink-0">
+                                            <span className="bg-blue-500 text-white text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full tracking-wider shrink-0">
                                               Driver
                                             </span>
                                           )}
                                         </div>
-                                        <span className="font-mono text-[#3A3A3C] shrink-0 tabular-nums">
+                                        <span className="font-mono text-gray-700 shrink-0 tabular-nums">
                                           {typeof pVal === "number" ? pVal.toFixed(4) : (pVal ?? "N/A")}
                                         </span>
                                       </div>
@@ -353,7 +353,7 @@ export default function DiagnosisTab() {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: EASE, delay: 0.05 }}
-        className="rounded-[28px] border border-white/50 bg-white/60 backdrop-blur-xl shadow-[0_4px_12px_rgba(0,0,0,0.04)] overflow-hidden"
+        className="glass-thin rounded-3xl overflow-hidden"
       >
         <button
           type="button"
@@ -361,14 +361,14 @@ export default function DiagnosisTab() {
           className="w-full px-7 py-5 flex items-center justify-between gap-4 hover:bg-white/40 transition-colors duration-200 text-left outline-none"
         >
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-[#F5F5F7] flex items-center justify-center shrink-0">
-              <Sigma className="w-4 h-4 text-[#6E6E73]" strokeWidth={1.75} />
+            <div className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0">
+              <Sigma className="w-4 h-4 text-gray-600" strokeWidth={1.75} />
             </div>
             <div>
-              <h2 className="text-base font-semibold tracking-tight text-[#1D1D1F]">
+              <h2 className="text-base font-semibold tracking-tight text-gray-900">
                 Missingness pattern matrix
               </h2>
-              <p className="text-xs text-[#8E8E93] mt-0.5">
+              <p className="text-xs text-gray-500 mt-0.5">
                 Advanced &mdash; how often columns are missing together
               </p>
             </div>
@@ -378,7 +378,7 @@ export default function DiagnosisTab() {
             transition={{ duration: 0.25, ease: EASE }}
             className="shrink-0"
           >
-            <ChevronDown className="w-4 h-4 text-[#AEAEB2]" />
+            <ChevronDown className="w-4 h-4 text-gray-400" />
           </motion.span>
         </button>
 
@@ -393,12 +393,12 @@ export default function DiagnosisTab() {
               className="overflow-hidden"
             >
               <div className="px-7 pb-7 pt-1 space-y-5">
-                <p className="text-sm text-[#6E6E73] leading-relaxed">
+                <p className="text-sm text-gray-600 leading-relaxed">
                   Values near zero mean no relationship; higher values mean their gaps tend to overlap.
                 </p>
 
                 {matrixLoading && (
-                  <div className="py-14 flex items-center justify-center text-sm text-[#8E8E93]">
+                  <div className="py-14 flex items-center justify-center text-sm text-gray-500">
                     <motion.span
                       animate={{ opacity: [0.4, 1, 0.4] }}
                       transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
@@ -409,7 +409,7 @@ export default function DiagnosisTab() {
                 )}
 
                 {!matrixLoading && matrixError && (
-                  <div className="p-4 rounded-2xl bg-[#FFB340]/10 border border-[#FFB340]/20 text-sm text-[#8A5A14]">
+                  <div className="p-4 rounded-2xl bg-warning/10 border border-warning/20 text-sm text-warning-fg">
                     {matrixError}
                   </div>
                 )}
@@ -417,7 +417,7 @@ export default function DiagnosisTab() {
                 {!matrixLoading && !matrixError && matrixData && (
                   <>
                     {matrixData.columns.length < 2 ? (
-                      <div className="py-6 text-sm text-[#6E6E73]">
+                      <div className="py-6 text-sm text-gray-600">
                         Only one column has missing values, so there&apos;s no pattern to compare.
                       </div>
                     ) : (
@@ -427,13 +427,13 @@ export default function DiagnosisTab() {
                             <table className="border-collapse mx-auto">
                               <thead>
                                 <tr>
-                                  <th className="p-2 text-left text-xs font-mono font-medium text-[#AEAEB2] sticky left-0 bg-white z-10">
+                                  <th className="p-2 text-left text-xs font-mono font-medium text-gray-400 sticky left-0 bg-white z-10">
                                     {/* Top-left corner */}
                                   </th>
                                   {matrixData.columns.map((colName) => (
                                     <th
                                       key={colName}
-                                      className="p-2 text-center text-xs font-mono font-medium text-[#6E6E73] max-w-[100px] truncate"
+                                      className="p-2 text-center text-xs font-mono font-medium text-gray-600 max-w-[100px] truncate"
                                       title={colName}
                                     >
                                       {colName}
@@ -445,7 +445,7 @@ export default function DiagnosisTab() {
                                 {matrixData.columns.map((rowCol, i) => (
                                   <tr key={rowCol}>
                                     <th
-                                      className="p-2 text-right pr-3 text-xs font-mono font-medium text-[#6E6E73] max-w-[120px] truncate sticky left-0 bg-white z-10"
+                                      className="p-2 text-right pr-3 text-xs font-mono font-medium text-gray-600 max-w-[120px] truncate sticky left-0 bg-white z-10"
                                       title={rowCol}
                                     >
                                       {rowCol}
@@ -472,7 +472,7 @@ export default function DiagnosisTab() {
                             </table>
                           </div>
                         </div>
-                        <p className="text-xs text-[#AEAEB2] text-center">
+                        <p className="text-xs text-gray-400 text-center">
                           Only columns with missing values are shown.
                         </p>
                       </div>

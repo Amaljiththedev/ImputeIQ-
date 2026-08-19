@@ -1,21 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  Database, 
-  FileCheck, 
-  Loader2, 
-  Sparkles, 
-  Table as TableIcon, 
-  ChevronDown, 
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  ChevronDown,
   ChevronUp,
-  Info
+  Info,
+  Loader2,
+  Sparkles,
+  Table as TableIcon,
 } from "lucide-react";
-import { getValidationProfile, applyValidation, ValidationProfileResponse, PlaceholderCandidateOut } from "@/lib/api";
+import {
+  applyValidation,
+  getValidationProfile,
+  setDataDictionary,
+  ColumnAssumptionOut,
+  PlaceholderCandidateOut,
+  ValidationProfileResponse,
+} from "@/lib/api";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { setCurrentJobId, setPhase, addLog } from "@/store/slices/jobSlice";
+
+function reprValue(val: unknown): string {
+  if (val === null || val === undefined) return "null";
+  if (typeof val === "string" && val.trim() === "") return '"" (empty string)';
+  return String(val);
+}
+
+/** Where a column's stated meaning came from. */
+function SourceBadge({ source }: { source: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    user_dictionary: { label: "Your description", cls: "bg-success-bg text-success-fg" },
+    language_model: { label: "Inferred from name", cls: "bg-warning-bg text-warning-fg" },
+    unavailable: { label: "Not established", cls: "bg-gray-100 text-gray-600" },
+  };
+  const { label, cls } = map[source] ?? map.unavailable;
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${cls}`}>
+      {label}
+    </span>
+  );
+}
 
 export default function ValidationGate() {
   const dispatch = useAppDispatch();
@@ -24,80 +51,93 @@ export default function ValidationGate() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profileData, setProfileData] = useState<ValidationProfileResponse | null>(null);
-  
-  // Track checked state for each placeholder candidate (key: `${candidate.column}:${candidate.placeholder_value}`)
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
   const [showStatsTable, setShowStatsTable] = useState(false);
 
+  // Data dictionary
+  const [showDictionary, setShowDictionary] = useState(false);
+  const [dictionaryText, setDictionaryText] = useState("");
+  const [savingDictionary, setSavingDictionary] = useState(false);
+
+  // Assumptions must be acknowledged before anything is written, since every
+  // placeholder decision below depends on them being right.
+  const [assumptionsReviewed, setAssumptionsReviewed] = useState(false);
+
+  async function loadProfile(datasetId: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getValidationProfile(datasetId);
+      setProfileData(data);
+      const initial: Record<string, boolean> = {};
+      data.candidates.forEach((cand) => {
+        const key = `${cand.column}:${cand.placeholder_value}`;
+        initial[key] =
+          cand.action === "replace_with_nan" ||
+          cand.recommendation.toLowerCase().includes("convert");
+      });
+      setSelected(initial);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load dataset validation profile.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!activeDatasetId) return;
-    let isMounted = true;
-
-    async function loadProfile() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getValidationProfile(activeDatasetId!);
-        if (!isMounted) return;
-        setProfileData(data);
-
-        // Default-select candidates where Gemini/heuristic recommended conversion
-        const initialSelected: Record<string, boolean> = {};
-        data.candidates.forEach((cand) => {
-          const key = `${cand.column}:${cand.placeholder_value}`;
-          initialSelected[key] = cand.action === "replace_with_nan" || cand.recommendation.toLowerCase().includes("convert");
-        });
-        setSelected(initialSelected);
-      } catch (err: unknown) {
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : "Failed to load dataset validation profile.");
-        }
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    }
-
-    loadProfile();
-    return () => {
-      isMounted = false;
-    };
+    loadProfile(activeDatasetId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDatasetId]);
+
+  const handleSaveDictionary = async () => {
+    if (!activeDatasetId) return;
+    setSavingDictionary(true);
+    try {
+      await setDataDictionary(activeDatasetId, dictionaryText);
+      // Re-profile: descriptions change how placeholder candidates are judged.
+      setAssumptionsReviewed(false);
+      await loadProfile(activeDatasetId);
+      setShowDictionary(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save data dictionary.");
+    } finally {
+      setSavingDictionary(false);
+    }
+  };
 
   const handleToggleCandidate = (candidate: PlaceholderCandidateOut) => {
     const key = `${candidate.column}:${candidate.placeholder_value}`;
-    setSelected((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setSelected((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handleApplyChanges = async (applySelected: boolean) => {
     if (!activeDatasetId) return;
     setSubmitting(true);
     try {
-      const replacements: Array<{ column: string; placeholder_value: any }> = [];
+      const replacements: Array<{ column: string; placeholder_value: unknown }> = [];
       if (applySelected && profileData) {
         profileData.candidates.forEach((cand) => {
           const key = `${cand.column}:${cand.placeholder_value}`;
           if (selected[key]) {
-            replacements.push({
-              column: cand.column,
-              placeholder_value: cand.placeholder_value,
-            });
+            replacements.push({ column: cand.column, placeholder_value: cand.placeholder_value });
           }
         });
       }
 
-      const job = await applyValidation(activeDatasetId, replacements);
+      const job = await applyValidation(activeDatasetId, replacements, assumptionsReviewed);
       dispatch(setCurrentJobId(job.id));
       dispatch(setPhase("diagnosing"));
-      if (replacements.length > 0) {
-        dispatch(addLog(`Applied ${replacements.length} placeholder conversions to validated copy (` +
-          replacements.map(r => `${r.column}=${r.placeholder_value}`).join(", ") + `). Starting missingness diagnosis...`));
-      } else {
-        dispatch(addLog("Proceeding with original dataset values without placeholder conversion. Starting missingness diagnosis..."));
-      }
+      dispatch(
+        addLog(
+          replacements.length > 0
+            ? `Applied ${replacements.length} placeholder conversion(s) to a copy (` +
+                replacements.map((r) => `${r.column}=${r.placeholder_value}`).join(", ") +
+                "). Starting diagnosis…"
+            : "Proceeding with original values, no conversions applied. Starting diagnosis…"
+        )
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to apply validation settings.");
       setSubmitting(false);
@@ -106,11 +146,12 @@ export default function ValidationGate() {
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center p-16 bg-white rounded-2xl shadow-sm border border-slate-100 min-h-[400px]">
-        <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-        <h3 className="text-lg font-semibold text-slate-800">Profiling Dataset & Analyzing Placeholders...</h3>
-        <p className="text-sm text-slate-500 mt-1 max-w-md text-center">
-          Checking distributions, null frequencies, and querying Gemini semantic validation for suspicious zero or sentinel values.
+      <div className="glass rounded-3xl flex flex-col items-center justify-center p-16 min-h-[380px] text-center">
+        <Loader2 className="w-7 h-7 text-blue-500 animate-spin mb-4" strokeWidth={1.75} />
+        <h3 className="text-[17px] font-semibold text-gray-900">Profiling the dataset</h3>
+        <p className="text-[13px] text-gray-600 mt-1.5 max-w-md">
+          Reading distributions and null counts, then checking which suspicious values are
+          plausible for each column.
         </p>
       </div>
     );
@@ -118,211 +159,271 @@ export default function ValidationGate() {
 
   if (error || !profileData) {
     return (
-      <div className="p-8 bg-red-50 border border-red-200 rounded-2xl flex flex-col items-center text-center">
-        <AlertTriangle className="w-10 h-10 text-red-600 mb-3" />
-        <h3 className="text-lg font-semibold text-red-900">Validation Profiling Failed</h3>
-        <p className="text-sm text-red-700 mt-1 max-w-md">{error || "No validation data received."}</p>
+      <div className="glass rounded-3xl p-10 flex flex-col items-center text-center">
+        <AlertTriangle className="w-7 h-7 text-danger-fg mb-3" strokeWidth={1.75} />
+        <h3 className="text-[17px] font-semibold text-gray-900">Profiling failed</h3>
+        <p className="text-[13px] text-gray-600 mt-1.5 max-w-md">
+          {error || "No validation data received."}
+        </p>
         <button
           onClick={() => handleApplyChanges(false)}
-          className="mt-6 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-xl transition-colors text-sm"
+          className="mt-6 px-5 py-2.5 rounded-full bg-blue-500 hover:bg-blue-600 text-white text-[13px] font-medium transition-colors"
         >
-          Skip Validation & Continue to Diagnosis →
+          Continue without conversions
         </button>
       </div>
     );
   }
 
+  const assumptions: ColumnAssumptionOut[] = profileData.assumptions ?? [];
+  const needingReview = assumptions.filter((a) => a.needs_review);
+  const blocked = needingReview.length > 0 && !assumptionsReviewed;
+
   return (
-    <div className="space-y-6 max-w-6xl mx-auto">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-md flex items-start justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-semibold mb-3">
-            <Sparkles className="w-3.5 h-3.5" />
-            Preprocessing & Data Validation Layer
-          </div>
-          <h2 className="text-2xl font-bold">Inspect & Validate Placeholder Missing Values</h2>
-          <p className="text-blue-100 text-sm mt-1 max-w-2xl">
-            Some datasets (e.g. medical or financial) encode missing observations as <span className="font-semibold text-white">0</span> or <span className="font-semibold text-white">-999</span> instead of <span className="font-semibold text-white">NaN</span>. Review Gemini semantic recommendations below before launching statistical diagnosis.
-          </p>
-        </div>
-        <FileCheck className="w-12 h-12 text-blue-200/50 hidden sm:block" />
-      </div>
+    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+      <header>
+        <h1 className="text-[28px] font-semibold text-gray-900">Check the data before it changes</h1>
+        <p className="text-[15px] text-gray-600 mt-1.5 max-w-3xl leading-relaxed">
+          Some datasets record missing values as real ones, such as a zero blood pressure or{" "}
+          <code className="font-mono text-[13px]">-999</code>. Nothing is altered until you approve
+          it, and your original file is never modified.
+        </p>
+      </header>
 
-      {/* Dataset Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dataset ID</span>
-          <div className="text-lg font-bold text-slate-800 mt-1 font-mono truncate">{profileData.dataset_id.slice(0, 8)}...</div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Rows</span>
-          <div className="text-2xl font-bold text-slate-800 mt-1">{profileData.row_count.toLocaleString()}</div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Columns</span>
-          <div className="text-2xl font-bold text-slate-800 mt-1">{profileData.column_count}</div>
-        </div>
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Duplicate Rows</span>
-          <div className="text-2xl font-bold text-slate-800 mt-1 flex items-center gap-2">
-            {profileData.duplicate_count}
-            {profileData.duplicate_count > 0 && <span className="text-xs text-amber-600 font-medium">(will be flagged)</span>}
-          </div>
-        </div>
-      </div>
-
-      {/* Potential Placeholders Review Section */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+      {/* How detection works. Stated rather than left to be inferred, because
+          the judgement rests on the column name unless the user says otherwise. */}
+      {profileData.detection_method && (
+        <div className="glass-thin rounded-xl px-5 py-4 flex gap-3">
+          <Info className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" strokeWidth={1.75} />
           <div>
-            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              Potential Placeholder Values Detected
-            </h3>
-            <p className="text-sm text-slate-500 mt-0.5">
-              Select which candidate placeholder values should be converted to <code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs font-mono">NaN</code> on the preprocessed copy before running diagnosis. Original raw file remains untouched.
+            <p className="text-[13px] font-semibold text-gray-900 mb-1">How these values were identified</p>
+            <p className="text-[13px] text-gray-600 leading-relaxed">{profileData.detection_method}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Column meanings. This is the interpretation everything below depends on. */}
+      <section className="glass rounded-3xl overflow-hidden">
+        <div className="px-6 py-5 border-b border-black/[0.06] flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-[17px] font-semibold text-gray-900">What each column is taken to mean</h2>
+            <p className="text-[13px] text-gray-600 mt-1 max-w-2xl leading-relaxed">
+              Placeholder decisions follow from these readings. Anything marked{" "}
+              <span className="font-medium text-warning-fg">inferred from name</span> is a guess and
+              may be wrong. Correct it by describing your data.
             </p>
           </div>
-          <div className="text-right text-xs text-slate-400">
-            {profileData.candidates.length} candidates evaluated
+          <button
+            onClick={() => setShowDictionary((v) => !v)}
+            className="shrink-0 inline-flex items-center gap-2 rounded-full border border-blue-500/30 px-4 py-2 text-[13px] font-medium text-blue-500 hover:bg-blue-50 transition-colors"
+          >
+            <BookOpen className="w-4 h-4" strokeWidth={1.75} />
+            {profileData.has_data_dictionary ? "Edit description" : "Describe your data"}
+          </button>
+        </div>
+
+        {showDictionary && (
+          <div className="px-6 py-5 border-b border-black/[0.06] bg-white/40">
+            <label className="block text-[13px] font-medium text-gray-900 mb-2">
+              Describe your columns
+            </label>
+            <p className="text-[12px] text-gray-600 mb-3 leading-relaxed">
+              One per line as <code className="font-mono">column: meaning</code>, or paste JSON. Any
+              column you describe here overrides the tool&apos;s own reading of its name.
+            </p>
+            <textarea
+              value={dictionaryText}
+              onChange={(e) => setDictionaryText(e.target.value)}
+              rows={7}
+              spellCheck={false}
+              placeholder={"bmi: Body mass index in kg/m2\nweight: Survey sampling weight, 0-1, not body weight\nn_visits: Prior clinic visits; missing means none occurred"}
+              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 font-mono text-[12px] text-gray-900 leading-relaxed focus:outline-none focus:border-blue-500"
+            />
+            <div className="flex items-center gap-3 mt-3">
+              <button
+                onClick={handleSaveDictionary}
+                disabled={savingDictionary || !dictionaryText.trim()}
+                className="inline-flex items-center gap-2 rounded-full bg-blue-500 hover:bg-blue-600 disabled:opacity-40 px-5 py-2 text-[13px] font-medium text-white transition-colors"
+              >
+                {savingDictionary && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {savingDictionary ? "Saving and re-checking…" : "Save and re-check"}
+              </button>
+              <button
+                onClick={() => setShowDictionary(false)}
+                className="text-[13px] text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
+        )}
+
+        <div className="divide-y divide-black/[0.05]">
+          {assumptions.map((a) => (
+            <div key={a.column} className="px-6 py-3.5 flex items-start gap-4">
+              <code className="font-mono text-[13px] font-medium text-gray-900 w-44 shrink-0 truncate">
+                {a.column}
+              </code>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] text-gray-700 leading-relaxed">{a.assumed_meaning}</p>
+                {a.plausible_range && (
+                  <p className="text-[12px] text-gray-500 mt-0.5">
+                    Expected range: {a.plausible_range}
+                  </p>
+                )}
+              </div>
+              <SourceBadge source={a.source} />
+            </div>
+          ))}
+          {assumptions.length === 0 && (
+            <p className="px-6 py-5 text-[13px] text-gray-600">No column assumptions returned.</p>
+          )}
+        </div>
+
+        {needingReview.length > 0 && (
+          <label className="flex items-start gap-3 px-6 py-4 border-t border-black/[0.06] bg-warning-bg/40 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={assumptionsReviewed}
+              onChange={(e) => setAssumptionsReviewed(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-blue-500 cursor-pointer"
+            />
+            <span className="text-[13px] text-gray-900 leading-relaxed">
+              I have read the {needingReview.length} inferred{" "}
+              {needingReview.length === 1 ? "meaning" : "meanings"} above and they are correct for my
+              data.
+            </span>
+          </label>
+        )}
+      </section>
+
+      {/* Placeholder candidates */}
+      <section className="glass rounded-3xl overflow-hidden">
+        <div className="px-6 py-5 border-b border-black/[0.06]">
+          <h2 className="text-[17px] font-semibold text-gray-900">Values that may mean missing</h2>
+          <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">
+            Tick the ones to convert to <code className="font-mono text-[12px]">NaN</code> on a
+            working copy. {profileData.candidates.length} candidate
+            {profileData.candidates.length === 1 ? "" : "s"} found across{" "}
+            {profileData.row_count.toLocaleString()} rows.
+          </p>
         </div>
 
         {profileData.candidates.length === 0 ? (
-          <div className="p-10 text-center text-slate-500 flex flex-col items-center">
-            <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-2" />
-            <span className="font-semibold text-slate-700">No suspicious placeholder values detected</span>
-            <span className="text-xs text-slate-400 mt-0.5">All columns appear to use standard null/NaN representation or legitimate numeric ranges.</span>
+          <div className="px-6 py-12 text-center">
+            <CheckCircle2 className="w-6 h-6 text-success mx-auto mb-2" strokeWidth={1.75} />
+            <p className="text-[13px] font-medium text-gray-900">No suspicious values found</p>
+            <p className="text-[12px] text-gray-600 mt-0.5">
+              Every column uses standard null representation.
+            </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 text-slate-600 text-xs font-semibold uppercase tracking-wider border-b border-slate-200">
-                  <th className="py-3.5 px-6 w-12">Convert</th>
-                  <th className="py-3.5 px-6">Column</th>
-                  <th className="py-3.5 px-6">Placeholder Value</th>
-                  <th className="py-3.5 px-6">Affected Rows</th>
-                  <th className="py-3.5 px-6">Gemini Recommendation</th>
-                  <th className="py-3.5 px-6">Confidence & Rationale</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {profileData.candidates.map((cand, idx) => {
-                  const key = `${cand.column}:${cand.placeholder_value}`;
-                  const isChecked = !!selected[key];
-                  const isRecommendedConvert = cand.action === "replace_with_nan" || cand.recommendation.toLowerCase().includes("convert");
-
-                  return (
-                    <tr 
-                      key={idx} 
-                      className={`transition-colors hover:bg-slate-50/60 ${isChecked ? "bg-blue-50/30" : ""}`}
-                    >
-                      <td className="py-4 px-6">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleCandidate(cand)}
-                          className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
-                        />
-                      </td>
-                      <td className="py-4 px-6 font-semibold text-slate-800">{cand.column}</td>
-                      <td className="py-4 px-6">
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                          {reprValue(cand.placeholder_value)}
+          <div className="divide-y divide-black/[0.05]">
+            {profileData.candidates.map((cand, idx) => {
+              const key = `${cand.column}:${cand.placeholder_value}`;
+              const isChecked = !!selected[key];
+              const pct = ((cand.count / profileData.row_count) * 100).toFixed(1);
+              return (
+                <label
+                  key={idx}
+                  className={`flex items-start gap-4 px-6 py-4 cursor-pointer transition-colors ${
+                    isChecked ? "bg-blue-500/[0.04]" : "hover:bg-white/50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => handleToggleCandidate(cand)}
+                    className="mt-1 w-4 h-4 accent-blue-500 cursor-pointer shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap mb-1">
+                      <code className="font-mono text-[13px] font-medium text-gray-900">
+                        {cand.column}
+                      </code>
+                      <span className="font-mono text-[12px] rounded-md bg-warning-bg px-2 py-0.5 text-warning-fg">
+                        {reprValue(cand.placeholder_value)}
+                      </span>
+                      <span className="text-[12px] text-gray-500 tabular-nums">
+                        {cand.count.toLocaleString()} rows ({pct}%)
+                      </span>
+                      {cand.source && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500">
+                          <Sparkles className="w-3 h-3" strokeWidth={2} />
+                          {cand.source === "gemini" ? "model" : "rule"} ·{" "}
+                          {(cand.confidence * 100).toFixed(0)}%
                         </span>
-                      </td>
-                      <td className="py-4 px-6 font-medium text-slate-700">
-                        {cand.count}{" "}
-                        <span className="text-xs text-slate-400 font-normal">
-                          ({((cand.count / profileData.row_count) * 100).toFixed(1)}%)
-                        </span>
-                      </td>
-                      <td className="py-4 px-6">
-                        <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-                          isRecommendedConvert
-                            ? "bg-blue-100 text-blue-800 border border-blue-200"
-                            : "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                        }`}>
-                          {isRecommendedConvert ? <Sparkles className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3" />}
-                          {cand.recommendation}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 max-w-md">
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <span className="text-xs font-semibold text-slate-600">
-                            Confidence: {(cand.confidence * 100).toFixed(0)}%
-                          </span>
-                          {cand.source && (
-                            <span
-                              className={`inline-flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md ${
-                                cand.source.toLowerCase() === "gemini"
-                                  ? "bg-purple-100 text-purple-800 border border-purple-200"
-                                  : "bg-slate-100 text-slate-700 border border-slate-200"
-                              }`}
-                            >
-                              {cand.source.toLowerCase() === "gemini" ? "AI Verified (Gemini)" : "Heuristic Fallback"}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 leading-relaxed">{cand.reason}</p>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      )}
+                    </div>
+                    <p className="text-[13px] text-gray-600 leading-relaxed">{cand.reason}</p>
+                  </div>
+                </label>
+              );
+            })}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Collapsible Data Quality Statistics Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+      {/* Column statistics */}
+      <section className="glass rounded-3xl overflow-hidden">
         <button
-          onClick={() => setShowStatsTable(!showStatsTable)}
-          className="w-full p-5 flex items-center justify-between text-left hover:bg-slate-50/60 transition-colors"
+          onClick={() => setShowStatsTable((v) => !v)}
+          className="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-white/50 transition-colors"
         >
-          <div className="flex items-center gap-2">
-            <TableIcon className="w-5 h-5 text-slate-500" />
-            <span className="font-bold text-slate-800">Full Column Profiling Statistics</span>
-            <span className="text-xs text-slate-400 font-normal">({profileData.profiles.length} columns profiled)</span>
-          </div>
-          {showStatsTable ? <ChevronUp className="w-5 h-5 text-slate-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+          <span className="flex items-center gap-2.5 text-[13px] font-semibold text-gray-900">
+            <TableIcon className="w-4 h-4 text-gray-500" strokeWidth={1.75} />
+            Column statistics
+            <span className="font-normal text-gray-500">
+              ({profileData.profiles.length} columns)
+            </span>
+          </span>
+          {showStatsTable ? (
+            <ChevronUp className="w-4 h-4 text-gray-400" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-gray-400" />
+          )}
         </button>
 
         {showStatsTable && (
-          <div className="border-t border-slate-100 overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+          <div className="border-t border-black/[0.06] overflow-x-auto">
+            <table className="w-full text-left text-[12px]">
               <thead>
-                <tr className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
-                  <th className="py-3 px-4">Column</th>
-                  <th className="py-3 px-4">DType</th>
-                  <th className="py-3 px-4 text-right">Min</th>
-                  <th className="py-3 px-4 text-right">Max</th>
-                  <th className="py-3 px-4 text-right">Mean</th>
-                  <th className="py-3 px-4 text-right">Median</th>
-                  <th className="py-3 px-4 text-right">Std</th>
-                  <th className="py-3 px-4 text-right">Unique</th>
-                  <th className="py-3 px-4 text-right">Nulls</th>
-                  <th className="py-3 px-4 text-right">Zeros</th>
+                <tr className="text-gray-500 border-b border-black/[0.06]">
+                  {["Column", "Type", "Min", "Max", "Mean", "Median", "SD", "Unique", "Nulls", "Zeros"].map(
+                    (h, i) => (
+                      <th
+                        key={h}
+                        className={`py-2.5 px-4 font-medium ${i > 1 ? "text-right" : ""}`}
+                      >
+                        {h}
+                      </th>
+                    )
+                  )}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-black/[0.04]">
                 {profileData.profiles.map((p, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/40">
-                    <td className="py-2.5 px-4 font-semibold text-slate-800">{p.column}</td>
-                    <td className="py-2.5 px-4 font-mono text-slate-500">{p.dtype}</td>
-                    <td className="py-2.5 px-4 text-right font-mono">{p.min ?? "—"}</td>
-                    <td className="py-2.5 px-4 text-right font-mono">{p.max ?? "—"}</td>
-                    <td className="py-2.5 px-4 text-right font-mono">{p.mean !== null && p.mean !== undefined ? p.mean : "—"}</td>
-                    <td className="py-2.5 px-4 text-right font-mono">{p.median !== null && p.median !== undefined ? p.median : "—"}</td>
-                    <td className="py-2.5 px-4 text-right font-mono">{p.std !== null && p.std !== undefined ? p.std : "—"}</td>
-                    <td className="py-2.5 px-4 text-right">{p.unique_count}</td>
-                    <td className={`py-2.5 px-4 text-right font-semibold ${p.null_count > 0 ? "text-amber-600" : "text-slate-600"}`}>
+                  <tr key={idx} className="hover:bg-white/50">
+                    <td className="py-2.5 px-4 font-mono font-medium text-gray-900">{p.column}</td>
+                    <td className="py-2.5 px-4 font-mono text-gray-500">{p.dtype}</td>
+                    <td className="py-2.5 px-4 text-right font-mono tabular-nums">{p.min ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right font-mono tabular-nums">{p.max ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right font-mono tabular-nums">{p.mean ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right font-mono tabular-nums">{p.median ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right font-mono tabular-nums">{p.std ?? "—"}</td>
+                    <td className="py-2.5 px-4 text-right tabular-nums">{p.unique_count}</td>
+                    <td
+                      className={`py-2.5 px-4 text-right tabular-nums ${
+                        p.null_count > 0 ? "text-warning-fg font-medium" : ""
+                      }`}
+                    >
                       {p.null_count}
                     </td>
-                    <td className={`py-2.5 px-4 text-right font-semibold ${p.zero_count > 0 ? "text-blue-600" : "text-slate-600"}`}>
+                    <td
+                      className={`py-2.5 px-4 text-right tabular-nums ${
+                        p.zero_count > 0 ? "text-blue-500 font-medium" : ""
+                      }`}
+                    >
                       {p.zero_count}
                     </td>
                   </tr>
@@ -331,48 +432,37 @@ export default function ValidationGate() {
             </table>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Action Footer Buttons */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Info className="w-4 h-4 text-slate-400 flex-shrink-0" />
-          <span>Replacements are applied strictly to <code className="bg-slate-100 px-1 py-0.5 rounded font-mono">validated_df = df.copy()</code>. Original dataset stays untouched.</span>
-        </div>
-
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <p className="text-[12px] text-gray-500 max-w-md leading-relaxed">
+          Conversions are written to a copy. Your uploaded file is never modified.
+        </p>
         <div className="flex items-center gap-3 w-full sm:w-auto">
           <button
             onClick={() => handleApplyChanges(false)}
             disabled={submitting}
-            className="flex-1 sm:flex-initial px-5 py-3 border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors text-sm disabled:opacity-50"
+            className="flex-1 sm:flex-initial rounded-full border border-gray-300 px-5 py-2.5 text-[13px] font-medium text-gray-700 hover:bg-white/70 transition-colors disabled:opacity-40"
           >
-            Skip & Keep Original Values
+            Keep original values
           </button>
-
           <button
             onClick={() => handleApplyChanges(true)}
-            disabled={submitting}
-            className="flex-1 sm:flex-initial px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-50"
+            disabled={submitting || blocked}
+            title={blocked ? "Confirm the inferred column meanings first" : undefined}
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 rounded-full bg-blue-500 hover:bg-blue-600 px-6 py-2.5 text-[13px] font-medium text-white transition-colors disabled:opacity-40"
           >
-            {submitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Applying & Starting Diagnosis...
-              </>
-            ) : (
-              <>
-                Apply Recommended Changes →
-              </>
-            )}
+            {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+            {submitting ? "Applying…" : "Apply and run diagnosis"}
           </button>
         </div>
       </div>
+
+      {blocked && (
+        <p className="text-[12px] text-warning-fg text-right">
+          Confirm the inferred column meanings before applying changes.
+        </p>
+      )}
     </div>
   );
-}
-
-function reprValue(val: any): string {
-  if (val === null || val === undefined) return "null";
-  if (typeof val === "string" && val.trim() === "") return '"" (empty string)';
-  return String(val);
 }

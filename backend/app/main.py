@@ -8,16 +8,18 @@ python-socketio's ASGIApp for real-time WebSocket support.
 
 from __future__ import annotations
 
+import logging
+
 import socketio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.db import Base, engine
 import app.models.db_models  # Ensure all ORM models (including ValidationDecisionCache) are registered before create_all
 # Register routers
 from app.api.routes import router as api_router
 from app.api.routes_synthetic import router as synthetic_router
-from app.api.routes_sensitivity import router as sensitivity_router
 from app.socket_manager import sio
 
 # Initialize database tables
@@ -31,11 +33,16 @@ try:
         conn.execute(text("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS validated_storage_path VARCHAR;"))
         conn.execute(text("ALTER TABLE diagnosis_results ADD COLUMN IF NOT EXISTS semantic_role VARCHAR;"))
         conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS semantic_role VARCHAR;"))
+        conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS n_unimputable INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS unimputable_reason TEXT;"))
         conn.execute(text("ALTER TABLE validation_decision_cache ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'gemini';"))
+        conn.execute(text("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS data_dictionary TEXT;"))
         conn.execute(text("ALTER TABLE datasets DROP COLUMN IF EXISTS user_id;"))
         conn.execute(text("DROP TABLE IF EXISTS users;"))
 except Exception as e:
     print(f"Schema check notice: {e}")
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Missing Data Pipeline API")
 
@@ -56,7 +63,24 @@ app.add_middleware(
 # Include routes
 app.include_router(api_router)
 app.include_router(synthetic_router, prefix="/api/synthetic", tags=["synthetic"])
-app.include_router(sensitivity_router, prefix="/api/sensitivity", tags=["sensitivity"])
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Return unhandled errors as a normal JSON response.
+
+    Without this, Starlette's ServerErrorMiddleware produces the 500. That
+    middleware sits outside CORSMiddleware, so the response carries no
+    Access-Control-Allow-Origin header and the browser reports a CORS failure
+    instead of the actual error. Returning a JSONResponse here keeps the
+    response inside the middleware stack, so the real cause is visible in the
+    network tab rather than being masked.
+    """
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {exc}"},
+    )
 
 
 @app.get("/health")

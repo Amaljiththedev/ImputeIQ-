@@ -87,10 +87,10 @@ export const mockImputationResults: ImputationResult[] = [
     id: "imp-2",
     target_column: "TotalCharge",
     routed_mechanism: "MCAR",
-    method_used: "Mean Imputation",
+    method_used: "MICE",
     low_confidence: false,
     rationale:
-      "Simple mean imputation is sufficient for MCAR numeric data with a low missing rate (1%). Since the data is missing completely at random, the mean is an unbiased estimator.",
+      "Chained equations with posterior draws. Mean imputation is unbiased only for the mean and biases regression weights and correlations even under MCAR (van Buuren 2018, Table 1.1), so the conditional model is used here too.",
     n_imputed: 50,
     imputed_file_path: "/data/imputed/mock-1-totalcharge.csv",
   },

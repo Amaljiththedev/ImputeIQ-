@@ -8,6 +8,7 @@ distinguish all three mechanisms on its own.
 
 from __future__ import annotations
 
+import enum
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,52 @@ NUMERIC_COLS = ["age", "bmi", "systolic_bp", "glucose", "visits_last_year", "sev
 CATEGORICAL_COLS = ["gender", "smoking_status", "region"]
 
 ALPHA = 0.05
+
+
+class MechanismClass(str, enum.Enum):
+    """The closed set of outcomes a diagnosis can take.
+
+    Introduced on supervisor advice. Scoring previously compared diagnosis and
+    ground truth as free text, so "Ambiguous (MCAR/MNAR)" matched both "MCAR"
+    and "MNAR" by substring and a column the tool had failed to classify counted
+    as correct. Comparing members of a fixed set removes that, and removes the
+    matching failures that arise from differences in spelling or wording.
+    """
+
+    MCAR = "MCAR"
+    MAR = "MAR"
+    MNAR = "MNAR"
+    # MCAR not rejected, or rejected with no driver found. The mechanism is not
+    # established; this is a distinct outcome, not a kind of MCAR or MNAR.
+    UNRESOLVED = "UNRESOLVED"
+    STRUCTURAL = "STRUCTURAL"
+    IDENTIFIER = "IDENTIFIER"
+    OTHER = "OTHER"
+
+
+def classify_mechanism(label: str | None) -> MechanismClass:
+    """Map a diagnosis label onto exactly one class.
+
+    Order matters. "Ambiguous (MCAR/MNAR)" and "Undetermined (MAR or MNAR)" both
+    contain mechanism names as substrings, so they are matched first and
+    resolved to UNRESOLVED rather than being read as a confident diagnosis.
+    """
+    text = (label or "").strip().upper()
+    if not text:
+        return MechanismClass.OTHER
+    if "AMBIGUOUS" in text or "UNDETERMINED" in text or "UNRESOLVED" in text:
+        return MechanismClass.UNRESOLVED
+    if "STRUCTURAL" in text:
+        return MechanismClass.STRUCTURAL
+    if "IDENTIFIER" in text or "KEY/ID" in text:
+        return MechanismClass.IDENTIFIER
+    if "MNAR" in text:
+        return MechanismClass.MNAR
+    if "MCAR" in text:
+        return MechanismClass.MCAR
+    if "MAR" in text:
+        return MechanismClass.MAR
+    return MechanismClass.OTHER
 
 
 def run_littles_test(df: pd.DataFrame, numeric_cols: list[str]) -> float:
@@ -121,11 +168,29 @@ def detect_structural_zero_candidate(
     if series.empty:
         return None
 
-    looks_like_count = (
+    # A count starts at zero and stays small. The earlier test asked only for
+    # non-negative integers with fewer than 10 distinct values, which a
+    # reference range satisfies: CPRD Aurum's numrangehigh holds values such as
+    # 12, 60, 130 and 210, all integers, only four of them, and frequently
+    # absent because non-laboratory observations carry no range. The column was
+    # therefore zero-filled, asserting a normal range whose upper bound is zero.
+    #
+    # Two further conditions rule that out. A genuine count reaches down to
+    # zero or one, and its largest value stays small.
+    MAX_PLAUSIBLE_COUNT = 20
+    is_nonneg_integer = (
         pd.api.types.is_numeric_dtype(series)
         and (series >= 0).all()
         and (series == series.round()).all()
+    )
+    reaches_the_low_end = bool(series.min() <= 1)
+    stays_small = bool(series.max() <= MAX_PLAUSIBLE_COUNT)
+
+    looks_like_count = (
+        is_nonneg_integer
         and series.nunique() < 10
+        and reaches_the_low_end
+        and stays_small
     )
     pct_missing = df[target_col].isna().mean() * 100
     name_hints = any(
@@ -179,7 +244,16 @@ def diagnose(
 
     if littles_p is None:
         littles_p = run_littles_test(df, numeric_cols)
-    littles_suggests_mcar = littles_p > alpha
+
+    # Little's test: H0 = the data are MCAR, H1 = they are not.
+    #
+    # p > alpha means we FAILED TO REJECT H0. That is not evidence that the
+    # data are MCAR -- only that this test, with this sample size and this
+    # number of missingness patterns, detected no departure it is powered to
+    # find. The variable is named for what it actually measures. The value is
+    # still persisted under the legacy `littles_suggests_mcar` field so the
+    # API contract is unchanged.
+    littles_fails_to_reject_mcar = littles_p > alpha
 
     cat_assoc = check_categorical_associations(df, target_col, categorical_cols)
     num_assoc = check_numeric_associations(df, target_col, numeric_cols)
@@ -202,15 +276,24 @@ def diagnose(
 
     if significant_drivers:
         diagnosis = "MAR (driver(s): " + ", ".join(significant_drivers) + ")"
-    elif littles_suggests_mcar:
+    elif littles_fails_to_reject_mcar:
         diagnosis = (
-            f"Ambiguous: MCAR or MNAR (indistinguishable from observed data "
-            f"— littles_p={littles_p:.4f})"
+            f"Ambiguous: consistent with MCAR, MNAR not excluded "
+            f"(Little's test did not reject MCAR, p={littles_p:.4f})"
         )
     else:
-        diagnosis = "Likely MNAR (by elimination — no observed driver found)"
+        # Previously reported as "Likely MNAR (by elimination)". That claim is
+        # not supportable: MNAR depends on the unrecorded values, so it cannot
+        # be established from observed data at all, and finding no driver among
+        # the MEASURED variables is equally consistent with MAR driven by
+        # something that was never measured, or with a real driver this test
+        # was underpowered to detect.
+        diagnosis = (
+            f"Undetermined: MCAR rejected (Little's p={littles_p:.4f}), "
+            f"no driver found among measured variables"
+        )
 
-    return littles_p, littles_suggests_mcar, cat_assoc, num_assoc, significant_drivers, diagnosis
+    return littles_p, littles_fails_to_reject_mcar, cat_assoc, num_assoc, significant_drivers, diagnosis
 
 
 def mechanism_label(diagnosis: str) -> str:

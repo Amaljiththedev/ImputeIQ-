@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes import get_dataset_or_404
+from app.core.diagnose_mechanism import classify_mechanism
 from app.core.synthetic_missingness import (
     CARDIO_GROUND_TRUTH_PATH,
     DATA_DIR,
@@ -145,6 +146,10 @@ def get_benchmark_scorecard(
     scorecard_items = []
     correct_count = 0
     total_evaluated = 0
+    # Columns whose ground-truth mechanism cannot be recovered from observed
+    # data at all (MNAR). Scoring these as hits or misses is equally wrong, so
+    # they are counted separately and excluded from the accuracy denominator.
+    undetectable_count = 0
 
     for diag in diagnosis_results:
         col = diag.target_column
@@ -170,24 +175,44 @@ def get_benchmark_scorecard(
         total_evaluated += 1
         diagnosed_mech = (diag.diagnosed_mechanism or "").upper()
 
-        # Evaluate match accuracy
+        # Collapse the diagnosis to a single category. Substring matching was
+        # the source of the previous scoring bug: the compound label
+        # "AMBIGUOUS (MCAR/MNAR)" contains both "MCAR" and "MNAR", so
+        # `gt_mech in diagnosed_mech` marked it an Exact Match against either
+        # ground truth. A column the tool had explicitly failed to classify was
+        # therefore scored as a correct answer, producing accuracies of 100%.
+        # Both sides are mapped onto the same fixed set before comparison, so
+        # scoring never depends on wording or spelling.
+        diagnosed_cat = classify_mechanism(diagnosed_mech).value
+        gt_mech = classify_mechanism(gt_mech).value
+
         is_match = False
         match_status = "Incorrect"
 
-        if gt_mech in diagnosed_mech or diagnosed_mech in gt_mech:
+        if gt_mech == "MNAR" and diagnosed_cat == "UNRESOLVED":
+            # The statistically honest outcome. MNAR depends on the unrecorded
+            # values, so no procedure on observed data can confirm it. Neither
+            # credited nor penalised.
+            undetectable_count += 1
+            match_status = "Not identifiable from observed data (expected)"
+        elif gt_mech == diagnosed_cat:
             is_match = True
-            match_status = "Exact Match"
             correct_count += 1
-        elif gt_mech == "MNAR" and ("MAR" in diagnosed_mech or diag.is_cautious_default):
-            is_match = True
-            match_status = "Mathematically Indistinguishable (Treated as MAR)"
-            correct_count += 1
-        elif gt_mech == "MAR" and diag.significant_drivers:
             gt_driver = gt_info.get("driver_column")
-            if gt_driver and gt_driver in diag.significant_drivers:
-                is_match = True
-                match_status = f"Driver '{gt_driver}' Correctly Detected"
-                correct_count += 1
+            if gt_mech == "MAR" and gt_driver and gt_driver in (diag.significant_drivers or []):
+                match_status = f"Exact match, driver '{gt_driver}' correctly identified"
+            else:
+                match_status = "Exact match"
+        elif gt_mech == "MCAR" and diagnosed_cat == "UNRESOLVED":
+            # Little's test can only fail to reject MCAR, never confirm it, so
+            # an unresolved result is the strongest available answer here.
+            is_match = True
+            correct_count += 1
+            match_status = "Consistent with MCAR (not rejected)"
+        elif gt_mech == "MAR" and diagnosed_cat == "UNRESOLVED":
+            match_status = "Missed: MAR driver not detected"
+        else:
+            match_status = f"Incorrect: expected {gt_mech}, diagnosed {diagnosed_cat}"
 
         scorecard_items.append(
             {
@@ -206,7 +231,17 @@ def get_benchmark_scorecard(
             }
         )
 
-    accuracy_pct = round((correct_count / total_evaluated * 100.0), 1) if total_evaluated > 0 else 0.0
+    # Accuracy is reported over the columns whose mechanism is recoverable from
+    # observed data. MNAR columns are excluded from the denominator and
+    # reported separately, so the headline figure is neither inflated by
+    # counting non-detections as hits nor deflated by penalising the tool for a
+    # limitation of the data itself.
+    detectable_evaluated = total_evaluated - undetectable_count
+    accuracy_pct = (
+        round((correct_count / detectable_evaluated * 100.0), 1)
+        if detectable_evaluated > 0
+        else None
+    )
 
     return {
         "dataset_id": dataset.id,
@@ -214,7 +249,14 @@ def get_benchmark_scorecard(
         "is_benchmark_dataset": is_benchmark,
         "source_dataset": manifest.get("source", "cardio_train_ground_truth.csv"),
         "total_columns_evaluated": total_evaluated,
+        "detectable_columns_evaluated": detectable_evaluated,
+        "not_identifiable_columns": undetectable_count,
         "correct_mechanisms": correct_count,
         "accuracy_pct": accuracy_pct,
+        "accuracy_basis": (
+            f"{correct_count}/{detectable_evaluated} identifiable columns; "
+            f"{undetectable_count} MNAR column(s) excluded as not identifiable "
+            f"from observed data"
+        ),
         "scorecard": scorecard_items,
     }

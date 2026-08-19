@@ -99,8 +99,9 @@ def run_diagnosis_job(job_id: str) -> None:
 
         numeric_cols, categorical_cols = get_dataset_columns(dataset, df)
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",
@@ -193,6 +194,8 @@ def run_imputation_job(job_id: str) -> None:
                     low_confidence=imp.low_confidence,
                     rationale=imp.rationale,
                     n_imputed=imp.n_imputed,
+                    n_unimputable=getattr(imp, "n_unimputable", 0),
+                    unimputable_reason=getattr(imp, "unimputable_reason", None),
                     imputed_file_path=str(output_path),
                     semantic_role=imp.semantic_role,
                 )
@@ -260,6 +263,9 @@ def run_explanation_job(job_id: str) -> None:
                     "diagnosed_mechanism": d.diagnosed_mechanism,
                     "diagnosis_detail": d.diagnosis_detail,
                     "n_missing": d.n_missing,
+                    # Lets the prompt state the missing proportion instead of
+                    # asking the model to infer one it has no denominator for.
+                    "row_count": dataset.row_count,
                     "method_used": imp.method_used if imp else "N/A",
                     "low_confidence": imp.low_confidence if imp else True,
                     "rationale": imp.rationale if imp else "Not yet imputed.",
@@ -336,8 +342,9 @@ def run_full_pipeline(job_id: str) -> None:  # noqa: C901
         diagnoses = diagnose_all_columns(df, numeric_cols, categorical_cols)
         emit_to_job(job_id, "job:log", {"message": f"Diagnosed {len(diagnoses)} columns with missing data"})
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",
@@ -396,6 +403,8 @@ def run_full_pipeline(job_id: str) -> None:  # noqa: C901
                     low_confidence=imp.low_confidence,
                     rationale=imp.rationale,
                     n_imputed=imp.n_imputed,
+                    n_unimputable=getattr(imp, "n_unimputable", 0),
+                    unimputable_reason=getattr(imp, "unimputable_reason", None),
                     imputed_file_path=str(output_path),
                     semantic_role=imp.semantic_role,
                 )
@@ -415,6 +424,7 @@ def run_full_pipeline(job_id: str) -> None:  # noqa: C901
                     "diagnosed_mechanism": diag.diagnosed_mechanism,
                     "diagnosis_detail": diag.diagnosis_detail,
                     "n_missing": diag.n_missing,
+                    "row_count": dataset.row_count,
                     "method_used": imp.method_used,
                     "low_confidence": imp.low_confidence,
                     "rationale": imp.rationale,
@@ -531,8 +541,9 @@ def run_recommendation_job(job_id: str) -> None:
             emit_to_job(job_id, "job:complete", {})
             return
 
-        available_display_methods = ["Median", "Mean", "KNN", "MICE", "Regression", "Zero", "Mode", "Flag-Only"]
+        available_display_methods = ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "Zero", "Mode", "Flag-Only"]
         method_display_map = {
+            "pmm": "PMM",
             "mice": "MICE",
             "median": "Median",
             "mean": "Mean",
@@ -661,6 +672,8 @@ def run_approved_imputation_and_explanation_job(job_id: str, method_overrides: d
                     low_confidence=imp.low_confidence,
                     rationale=imp.rationale,
                     n_imputed=imp.n_imputed,
+                    n_unimputable=getattr(imp, "n_unimputable", 0),
+                    unimputable_reason=getattr(imp, "unimputable_reason", None),
                     imputed_file_path=str(output_path),
                     semantic_role=imp.semantic_role,
                 )
@@ -676,6 +689,7 @@ def run_approved_imputation_and_explanation_job(job_id: str, method_overrides: d
                 "diagnosed_mechanism": diag.diagnosed_mechanism,
                 "diagnosis_detail": diag.diagnosis_detail,
                 "n_missing": diag.n_missing,
+                "row_count": dataset.row_count,
                 "method_used": imp.method_used,
                 "low_confidence": imp.low_confidence,
                 "rationale": imp.rationale,

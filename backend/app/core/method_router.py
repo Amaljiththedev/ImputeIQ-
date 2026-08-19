@@ -26,18 +26,67 @@ import pandas as pd
 
 from app.core.imputation_engine import IMPUTERS
 
+# Routing for CONTINUOUS columns, from the published properties of each method
+# rather than from benchmark results on any one dataset.
+#
+# van Buuren (2018), Flexible Imputation of Missing Data, 2nd ed., Table 1.1
+# summarises which methods are unbiased under which mechanism:
+#
+#   method                 unbiased mean   reg. weight   correlation
+#   mean/median            MCAR only       never         never
+#   regression             MAR             MAR           never
+#   stochastic regression  MAR             MAR           MAR
+#
+# Two consequences follow.
+#
+# MAR was previously routed to median. Median is unbiased only under MCAR, so
+# under MAR it is biased for the mean and for every other estimate, precisely
+# in the case where the diagnosis step has already named the observed driver.
+# Chained equations is the stochastic regression row, unbiased for all three
+# quantities under MAR. The variant used is predictive mean matching, which
+# takes each imputation from an actually observed value rather than from the
+# unbounded normal posterior. Sampling the posterior directly produced 453
+# negative clinical measurements on a CPRD extract whose observed minimum was
+# zero; matching cannot leave the observed range. It is also the default method
+# in the mice package (van Buuren 2018, sec. 3.4).
+#
+# MCAR is a special case of MAR, so the same row still applies and MICE stays.
+#
+# MNAR keeps median as a transparent baseline, since no method is valid without
+# an untestable assumption about the unobserved values; it is flagged
+# low-confidence and paired with the sensitivity bound. Ambiguous and
+# Undetermined normalise to MNAR and take that same cautious path.
 ROUTING_TABLE = {
-    "MCAR": "mice",
-    "MAR": "median",
+    "MCAR": "pmm",
+    "MAR": "pmm",
     "MNAR": "median",
 }
 
 LOW_CONFIDENCE_MECHANISMS = {"MNAR"}
 
 CONTINUOUS_RATIONALE = {
-    "MCAR": "MICE is selected to robustly preserve multivariate distributions and variance under missing completely at random conditions.",
-    "MAR": "Median is selected as a robust central tendency estimator; empirical tests generally show it performs comparably to MICE for MAR without the computational overhead.",
-    "MNAR": "Median is applied as a baseline estimate, but no standard method is theoretically valid under MNAR -- flagged for manual review rather than trusted at face value.",
+    "MCAR": (
+        "Chained equations with predictive mean matching. Under MCAR the observed cases are a "
+        "random subsample, so estimates are recoverable; the conditional model is used "
+        "in preference to mean or median fill because the latter bias regression "
+        "weights and correlations even under MCAR (van Buuren 2018, Table 1.1)."
+    ),
+    "MAR": (
+        "Chained equations with predictive mean matching, conditioning on the observed drivers "
+        "identified during diagnosis. Under MAR the missingness is explained by observed "
+        "variables, so unbiased estimates require conditioning on them. Mean and median "
+        "imputation are unbiased only under MCAR and bias the mean, regression weights "
+        "and correlations under MAR; stochastic regression is unbiased for all three "
+        "(van Buuren 2018, Table 1.1). Each imputed value is drawn from an "
+        "actually observed measurement, so imputations stay within the observed range "
+        "(van Buuren 2018, sec. 3.4)."
+    ),
+    "MNAR": (
+        "Median as a transparent baseline. No standard method is valid under MNAR without "
+        "an untestable assumption about the unobserved values, so this is flagged for "
+        "review and reported alongside the delta-adjusted sensitivity bound rather than "
+        "trusted at face value."
+    ),
 }
 
 
@@ -60,6 +109,12 @@ def _normalize_role(semantic_role) -> str:
 
 def _normalize_mechanism(diagnosed_mechanism: str) -> str:
     label = (diagnosed_mechanism or "").upper()
+    # "Undetermined (MAR or MNAR)" means MCAR was rejected but no measured
+    # driver was found. Checked before the MAR test below, which would
+    # otherwise match on the substring "MAR" and route it as confidently MAR.
+    # Treated as MNAR so it keeps the cautious, low-confidence path.
+    if "UNDETERMINED" in label:
+        return "MNAR"
     if "AMBIGUOUS" in label:
         return "MNAR"
     if "MAR" in label and "MCAR" not in label:

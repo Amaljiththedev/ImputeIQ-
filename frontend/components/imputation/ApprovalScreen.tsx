@@ -25,6 +25,7 @@ interface ColumnRecommendation {
 function formatMethodName(method: string): string {
   if (method === "not_implemented") return "Not yet supported";
   const lower = method.trim().toLowerCase();
+  if (lower === "pmm") return "PMM";
   if (lower === "mice") return "MICE";
   if (lower === "knn") return "KNN";
   if (lower === "mean") return "Mean";
@@ -232,7 +233,7 @@ export default function ApprovalScreen() {
       ? ["flag_only"]
       : isCat
       ? ["mode", "zero"]
-      : ["Median", "Mean", "KNN", "MICE", "Regression", "zero"];
+      : ["PMM", "MICE", "Median", "Mean", "KNN", "Regression", "zero"];
 
     return {
       columnName: diag.target_column,
@@ -313,7 +314,7 @@ export default function ApprovalScreen() {
                 dispatch(clearCurrentJob());
                 dispatch(setPhase("complete"));
               }}
-              className="rounded-xl bg-[#1D1D1F] px-6 py-2.5 text-sm font-medium text-white transition-all hover:bg-black shadow-md"
+              className="rounded-xl bg-gray-900 px-6 py-2.5 text-sm font-medium text-white transition-all hover:bg-black shadow-md"
             >
               Proceed to Overview Dashboard
             </button>
@@ -326,7 +327,7 @@ export default function ApprovalScreen() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
       {/* Heading */}
-      <div className="mb-8 bg-white/60 backdrop-blur-md rounded-2xl p-6 border border-gray-100 shadow-sm">
+      <div className="glass-thin mb-8 rounded-2xl p-6">
         <h1 className="text-2xl font-bold text-gray-900 tracking-tight mb-2">
           Human-in-the-Loop Imputation Gate
         </h1>
@@ -349,7 +350,7 @@ export default function ApprovalScreen() {
       </div>
 
       {/* Action buttons */}
-      <div className="flex items-center justify-end gap-3 sticky bottom-6 bg-white/90 backdrop-blur-xl p-4 rounded-2xl border border-gray-200/80 shadow-lg">
+      <div className="flex items-center justify-end gap-3 sticky bottom-6 glass p-4 rounded-2xl border border-gray-200/80 shadow-lg">
         <button
           onClick={() => {
             dispatch(clearCurrentJob());
@@ -363,7 +364,7 @@ export default function ApprovalScreen() {
         <button
           onClick={handleContinue}
           disabled={isSubmitting}
-          className="rounded-xl bg-[#1D1D1F] px-6 py-2.5 text-[14px] font-medium text-white transition-all hover:bg-black flex items-center gap-2 shadow-md disabled:opacity-50"
+          className="rounded-xl bg-gray-900 px-6 py-2.5 text-[14px] font-medium text-white transition-all hover:bg-black flex items-center gap-2 shadow-md disabled:opacity-50"
         >
           {isSubmitting ? (
             <>

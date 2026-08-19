@@ -15,7 +15,12 @@ import {
   Download,
   ArrowRight,
 } from "lucide-react";
-import { SensitivityMetric, fetchSensitivityMetrics } from "@/lib/api";
+import {
+  SensitivityMetric,
+  RobustnessColumn,
+  fetchSensitivityMetrics,
+  fetchRobustness,
+} from "@/lib/api";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -25,6 +30,7 @@ export default function SensitivityTab() {
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [activeScenario, setActiveScenario] = useState<"mar" | "mcar" | "mnar">("mar");
   const [fetchedMetrics, setFetchedMetrics] = useState<SensitivityMetric[]>([]);
+  const [robustness, setRobustness] = useState<RobustnessColumn[]>([]);
 
   useEffect(() => {
     if (activeDatasetId && (!activeResults?.sensitivity_metrics || activeResults.sensitivity_metrics.length === 0)) {
@@ -34,87 +40,70 @@ export default function SensitivityTab() {
     }
   }, [activeDatasetId, activeResults?.sensitivity_metrics]);
 
+  useEffect(() => {
+    if (!activeDatasetId) return;
+    let live = true;
+    fetchRobustness(activeDatasetId)
+      .then((r) => { if (live) setRobustness(r.columns || []); })
+      .catch(() => { if (live) setRobustness([]); });
+    return () => { live = false; };
+  }, [activeDatasetId]);
+
   if (!activeResults || !activeResults.dataset) return null;
 
-  const {
-    dataset,
-    diagnosis_results = [],
-    imputation_results = [],
-    sensitivity_metrics = [],
-  } = activeResults;
+  const { sensitivity_metrics = [] } = activeResults;
 
-  const rowCount = dataset.row_count || 1;
-  const diagMap = new Map(diagnosis_results.map((d) => [d.target_column, d]));
-  const impMap = new Map(imputation_results.map((i) => [i.target_column, i]));
+  // Metrics come from the backend only. There was previously a client-side
+  // fallback that synthesised these numbers from hardcoded constants (e.g.
+  // stabilityScore = 96, baselineVal = 100 - missingPct * 10) whenever the
+  // backend returned nothing. Those values were not derived from the data and
+  // were visually indistinguishable from real ones, so a missing CSV on disk
+  // silently produced fabricated statistics. If the backend has no metrics we
+  // now say so instead of inventing them.
+  const metrics: SensitivityMetric[] =
+    sensitivity_metrics.length > 0 ? sensitivity_metrics : fetchedMetrics;
 
-  // Fallback dynamic computation if backend sensitivity metrics are still loading
-  const fallbackMetrics: SensitivityMetric[] = diagnosis_results.map((diag) => {
-    const col = diag.target_column;
-    const imp = impMap.get(col);
-    const isNumeric = dataset.numeric_columns.includes(col);
-    const missingPct = diag.n_missing / rowCount;
-    const isAmbiguous = diag.diagnosed_mechanism.startsWith("Ambiguous");
+  if (metrics.length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="glass rounded-3xl px-10 py-12 max-w-md text-center">
+          <BarChart3 className="w-6 h-6 text-gray-500 mx-auto mb-4" strokeWidth={1.5} />
+          <h3 className="text-[17px] font-semibold text-gray-900 mb-2">
+            Sensitivity metrics unavailable
+          </h3>
+          <p className="text-[13px] text-gray-600 leading-relaxed">
+            The backend returned no metrics for this dataset. This usually means the
+            source CSV could not be read from disk. Re-run the analysis rather than
+            treating the absence as a result.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-    let stabilityScore = 96;
-    let status: "Highly Stable" | "Robust" | "Needs Caution" = "Highly Stable";
-    let shiftPct = 0.8;
-
-    if (isAmbiguous || imp?.low_confidence) {
-      stabilityScore = 78;
-      status = "Needs Caution";
-      shiftPct = 3.4;
-    } else if (missingPct > 0.03) {
-      stabilityScore = 89;
-      status = "Robust";
-      shiftPct = 1.5;
-    }
-
-    const baselineVal = isNumeric ? `Mean: ${(100 - missingPct * 10).toFixed(1)}` : `Mode: Primary (${(60 - missingPct * 20).toFixed(0)}%)`;
-    const primaryVal = isNumeric ? `Mean: ${(100 - missingPct * 10 + shiftPct * 0.1).toFixed(1)} (±0.2%)` : `Mode: Primary (${(60 - missingPct * 18).toFixed(0)}%)`;
-    const worstCaseVal = isNumeric ? `Mean: ${(100 - missingPct * 10 - shiftPct * 1.5).toFixed(1)} (-${(shiftPct * 1.5).toFixed(1)}%)` : `Mode shifted under extreme gap clustering`;
-
-    return {
-      column: col,
-      type: isNumeric ? "numeric" : "categorical",
-      missingCount: diag.n_missing,
-      missingPct,
-      stabilityScore,
-      status,
-      baselineVal,
-      primaryVal,
-      worstCaseVal,
-      shiftPct,
-      description: isAmbiguous
-        ? `Because the missingness mechanism is ambiguous, downstream models may shift up to ±${shiftPct}% if unobserved factors drive the gaps.`
-        : `Our conditional imputation preserves subgroup variances within ±${shiftPct}% of the complete-case baseline.`,
-      scenarioNotes: {
-        mar: `Under MAR (conditional on ${diag.significant_drivers?.[0] || "observed predictors"}), group-level distributions remain unbiased and variance is fully preserved.`,
-        mcar: `If gaps were purely random (MCAR), simple mean or mode fill would yield nearly identical results with 0.2% lower standard error.`,
-        mnar: `Under extreme MNAR (worst-case assumption where missing values cluster at the tails), estimates shift by up to ±${(shiftPct * 1.8).toFixed(1)}%.`,
-      },
-    };
-  });
-
-  const metrics: SensitivityMetric[] = sensitivity_metrics.length > 0
-    ? sensitivity_metrics
-    : fetchedMetrics.length > 0
-    ? fetchedMetrics
-    : fallbackMetrics;
+  // Open on a column the robustness comparison actually covers. Falling back to
+  // metrics[0] put an identifier (never imputed, so never analysed) in the panel
+  // on first render, which silently hid the robustness block until the user
+  // happened to click a numeric column.
+  const defaultMetric =
+    metrics.find((m) => robustness.some((r) => r.column === m.column)) ||
+    metrics[0] ||
+    null;
 
   const activeMetric =
-    metrics.find((m) => m.column === selectedColumn) || metrics[0] || null;
+    metrics.find((m) => m.column === selectedColumn) || defaultMetric;
 
-  const avgStability =
-    metrics.length > 0
-      ? Math.round(metrics.reduce((acc, m) => acc + m.stabilityScore, 0) / metrics.length)
-      : 100;
+  const avgStability = Math.round(
+    metrics.reduce((acc, m) => acc + m.stabilityScore, 0) / metrics.length
+  );
 
-  const maxShift =
-    metrics.length > 0
-      ? Math.max(...metrics.map((m) => m.shiftPct)).toFixed(1)
-      : "0.0";
+  const maxShift = Math.max(...metrics.map((m) => m.shiftPct)).toFixed(1);
 
   const cautionCount = metrics.filter((m) => m.status === "Needs Caution").length;
+
+  const activeRobustness = activeMetric
+    ? robustness.find((r) => r.column === activeMetric.column) ?? null
+    : null;
 
   return (
     <div className="w-full h-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.8fr_1.2fr] gap-8 overflow-y-auto lg:overflow-hidden">
@@ -125,15 +114,24 @@ export default function SensitivityTab() {
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Overall Robustness</p>
+            <p className="text-sm text-gray-600 mb-2">Mean variance retained</p>
             <div className="flex items-baseline gap-2">
-              <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+              <p className="text-3xl font-semibold tabular-nums text-gray-900">
                 {avgStability}%
               </p>
-              <span className="text-xs font-medium text-[#1F8A3D] bg-[#34C759]/12 px-2 py-0.5 rounded-full">
-                High
+              {/* Derived from the score rather than a fixed "High" label. */}
+              <span
+                className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                  avgStability >= 95
+                    ? "text-success-fg bg-success/12"
+                    : avgStability >= 90
+                    ? "text-blue-500 bg-blue-500/10"
+                    : "text-warning-fg bg-warning/15"
+                }`}
+              >
+                {avgStability >= 95 ? "High" : avgStability >= 90 ? "Moderate" : "Low"}
               </span>
             </div>
           </motion.div>
@@ -141,10 +139,10 @@ export default function SensitivityTab() {
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Max Scenario Shift</p>
-            <p className="text-3xl font-semibold tabular-nums text-[#1D1D1F]">
+            <p className="text-sm text-gray-600 mb-2">Max Scenario Shift</p>
+            <p className="text-3xl font-semibold tabular-nums text-gray-900">
               ±{maxShift}%
             </p>
           </motion.div>
@@ -152,12 +150,12 @@ export default function SensitivityTab() {
           <motion.div
             whileHover={{ y: -2 }}
             transition={{ duration: 0.25, ease: EASE }}
-            className="rounded-[24px] border border-white/50 bg-white/90 backdrop-blur-xl px-6 py-5 shadow-[0_4px_12px_rgba(0,0,0,0.04)]"
+            className="glass rounded-2xl px-6 py-5"
           >
-            <p className="text-sm text-[#6E6E73] mb-2">Sensitive Columns</p>
+            <p className="text-sm text-gray-600 mb-2">Sensitive Columns</p>
             <p
               className={`text-3xl font-semibold tabular-nums ${
-                cautionCount > 0 ? "text-[#FFB340]" : "text-[#1D1D1F]"
+                cautionCount > 0 ? "text-warning" : "text-gray-900"
               }`}
             >
               {cautionCount}
@@ -167,10 +165,10 @@ export default function SensitivityTab() {
 
         {/* Section Heading */}
         <div className="shrink-0 mb-5">
-          <h3 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+          <h3 className="text-xl font-semibold tracking-tight text-gray-900">
             Distribution Stability Across Scenarios
           </h3>
-          <p className="text-sm text-[#6E6E73] mt-1.5 leading-relaxed">
+          <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
             Compare how parameter estimates shift between Complete Case baseline, our selected conditional imputation, and extreme worst-case bounds.
           </p>
         </div>
@@ -186,42 +184,42 @@ export default function SensitivityTab() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.25, ease: EASE, delay: Math.min(idx * 0.03, 0.3) }}
                 onClick={() => setSelectedColumn(m.column)}
-                className={`cursor-pointer rounded-[24px] border p-5 transition-all duration-200 ${
+                className={`cursor-pointer rounded-2xl border p-5 transition-all duration-200 ${
                   isSelected
-                    ? "bg-white border-[#0071E3]/40 shadow-[0_6px_20px_rgba(0,113,227,0.08)] ring-1 ring-[#0071E3]/30"
+                    ? "bg-white border-blue-500/40 shadow-[0_6px_20px_rgba(0,113,227,0.08)] ring-1 ring-blue-500/30"
                     : "bg-white/80 border-white/60 hover:bg-white shadow-[0_2px_8px_rgba(0,0,0,0.03)]"
                 }`}
               >
                 <div className="flex items-center justify-between gap-3 mb-3.5">
                   <div className="flex items-center gap-2.5">
-                    <code className="text-base font-mono font-semibold text-[#1D1D1F]">
+                    <code className="text-base font-mono font-semibold text-gray-900">
                       {m.column}
                     </code>
-                    <span className="text-xs font-medium text-[#8E8E93] bg-[#F5F5F7] px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full uppercase tracking-wider">
                       {m.type}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
                     {m.status === "Highly Stable" && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-xs font-medium text-[#1F8A3D]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-success/12 px-2.5 py-1 text-xs font-medium text-success-fg">
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         {m.status}
                       </span>
                     )}
                     {m.status === "Robust" && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[#0071E3]/10 px-2.5 py-1 text-xs font-medium text-[#0071E3]">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-500">
                         <ShieldCheck className="w-3.5 h-3.5" />
                         {m.status}
                       </span>
                     )}
                     {m.status === "Needs Caution" && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FFB340]/15 px-2.5 py-1 text-xs font-medium text-[#B8791F]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-warning/15 px-2.5 py-1 text-xs font-medium text-warning-fg">
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {m.status}
                       </span>
                     )}
                     {m.status === "Not Imputed (Identifier)" && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#F5F5F7] px-2.5 py-1 text-xs font-medium text-[#6E6E73]">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
                         {m.status}
                       </span>
                     )}
@@ -230,21 +228,21 @@ export default function SensitivityTab() {
 
                 {/* Comparison Bar / Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 pb-1 text-xs">
-                  <div className="bg-[#F5F5F7]/80 rounded-xl p-3">
-                    <span className="text-[#8E8E93] block mb-1 font-medium">Complete Case</span>
-                    <span className="font-mono font-medium text-[#3A3A3C]">{m.baselineVal}</span>
+                  <div className="bg-gray-100/80 rounded-xl p-3">
+                    <span className="text-gray-500 block mb-1 font-medium">Complete Case</span>
+                    <span className="font-mono font-medium text-gray-700">{m.baselineVal}</span>
                   </div>
-                  <div className="bg-[#0071E3]/8 border border-[#0071E3]/15 rounded-xl p-3">
-                    <span className="text-[#0071E3] block mb-1 font-semibold">Selected Strategy</span>
-                    <span className="font-mono font-semibold text-[#1D1D1F]">{m.primaryVal}</span>
+                  <div className="bg-blue-500/8 border border-blue-500/15 rounded-xl p-3">
+                    <span className="text-blue-500 block mb-1 font-semibold">Selected Strategy</span>
+                    <span className="font-mono font-semibold text-gray-900">{m.primaryVal}</span>
                   </div>
-                  <div className="bg-[#F5F5F7]/80 rounded-xl p-3">
-                    <span className="text-[#8E8E93] block mb-1 font-medium">Worst-Case Bound</span>
-                    <span className="font-mono font-medium text-[#6E6E73]">{m.worstCaseVal}</span>
+                  <div className="bg-gray-100/80 rounded-xl p-3">
+                    <span className="text-gray-500 block mb-1 font-medium">Worst-Case Bound</span>
+                    <span className="font-mono font-medium text-gray-600">{m.worstCaseVal}</span>
                   </div>
                 </div>
 
-                <p className="text-xs text-[#6E6E73] mt-3 leading-relaxed">
+                <p className="text-xs text-gray-600 mt-3 leading-relaxed">
                   {m.description}
                 </p>
               </motion.div>
@@ -254,23 +252,23 @@ export default function SensitivityTab() {
       </div>
 
       {/* Right Column: Scenario Exploration & Action Card */}
-      <div className="flex flex-col min-h-0 rounded-[28px] border border-white/50 bg-white/90 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.06)] px-6 py-6">
+      <div className="flex flex-col min-h-0 glass rounded-3xl px-6 py-6">
         <div className="shrink-0 mb-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-semibold tracking-tight text-[#1D1D1F]">
+            <h3 className="text-xl font-semibold tracking-tight text-gray-900">
               Scenario Exploration
             </h3>
-            <Sliders className="w-5 h-5 text-[#AEAEB2]" strokeWidth={1.75} />
+            <Sliders className="w-5 h-5 text-gray-400" strokeWidth={1.75} />
           </div>
-          <p className="text-sm text-[#6E6E73] mt-1.5 leading-relaxed">
-            Examine how {activeMetric?.column ? <code className="font-mono font-medium text-[#1D1D1F]">{activeMetric.column}</code> : "selected column"} behaves across theoretical missingness assumptions.
+          <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
+            Examine how {activeMetric?.column ? <code className="font-mono font-medium text-gray-900">{activeMetric.column}</code> : "selected column"} behaves across theoretical missingness assumptions.
           </p>
         </div>
 
         {activeMetric ? (
           <div className="flex-1 min-h-0 overflow-y-auto pr-1 -mx-1 space-y-4">
             {/* Scenario Toggles */}
-            <div className="flex bg-[#F5F5F7] p-1 rounded-2xl gap-1">
+            <div className="flex bg-gray-100 p-1 rounded-2xl gap-1">
               {(["mar", "mcar", "mnar"] as const).map((scen) => (
                 <button
                   key={scen}
@@ -278,8 +276,8 @@ export default function SensitivityTab() {
                   onClick={() => setActiveScenario(scen)}
                   className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all ${
                     activeScenario === scen
-                      ? "bg-white text-[#1D1D1F] shadow-sm"
-                      : "text-[#8E8E93] hover:text-[#3A3A3C]"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
                   }`}
                 >
                   {scen.toUpperCase()}
@@ -295,49 +293,197 @@ export default function SensitivityTab() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.2, ease: EASE }}
-                className="rounded-2xl bg-[#F5F5F7]/80 p-5 space-y-3"
+                className="rounded-2xl bg-gray-100/80 p-5 space-y-3"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-[#8E8E93]">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
                     {activeScenario === "mar"
                       ? "Missing At Random (Primary Assumption)"
                       : activeScenario === "mcar"
                       ? "Missing Completely At Random"
                       : "Missing Not At Random (Extreme Bound)"}
                   </span>
-                  <span className="font-mono text-xs font-bold text-[#0071E3]">
-                    Score: {activeScenario === "mar" ? activeMetric.stabilityScore : activeScenario === "mcar" ? Math.min(100, activeMetric.stabilityScore + 4) : Math.max(60, activeMetric.stabilityScore - 15)}/100
+                  {/* The score is a property of the imputed column, not of the
+                      scenario being viewed. It previously had +4 added under
+                      MCAR and 15 subtracted under MNAR, which invented three
+                      different numbers from one measurement. */}
+                  <span className="font-mono text-xs font-bold text-blue-500">
+                    Variance retained: {activeMetric.stabilityScore}%
                   </span>
                 </div>
-                <p className="text-sm text-[#3A3A3C] leading-relaxed">
+                <p className="text-sm text-gray-700 leading-relaxed">
                   {activeMetric.scenarioNotes[activeScenario]}
                 </p>
               </motion.div>
             </AnimatePresence>
 
             {/* Subgroup Impact Breakdown */}
-            <div className="rounded-2xl border border-[#E5E5E7] p-5 space-y-3">
-              <h4 className="text-sm font-semibold text-[#1D1D1F] flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-[#0071E3]" />
-                Downstream Variance Check
+            <div className="rounded-2xl border border-gray-200 p-5 space-y-3">
+              <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-blue-500" />
+                Distribution impact
               </h4>
-              <p className="text-xs text-[#6E6E73] leading-relaxed">
-                When running regressions or clustering using <code className="font-mono font-medium text-[#1D1D1F]">{activeMetric.column}</code>, the max estimated coefficient deviation is bounded within <strong className="text-[#1D1D1F]">±{activeMetric.shiftPct}%</strong>.
+              {/* The previous copy claimed a bound on downstream regression
+                  coefficients. Nothing here measures that: the figure is the
+                  shift in this column's own mean. */}
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Imputing <code className="font-mono font-medium text-gray-900">{activeMetric.column}</code> retains{" "}
+                <strong className="text-gray-900">{activeMetric.stabilityScore}%</strong> of its original spread and moves its
+                mean by <strong className="text-gray-900">{activeMetric.shiftPct}%</strong>. This describes the column itself,
+                not the effect on any downstream model.
               </p>
-              <div className="w-full bg-[#E8E8ED] h-2 rounded-full overflow-hidden mt-2">
+              <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden mt-2">
                 <div
-                  className="bg-[#0071E3] h-full rounded-full transition-all duration-500"
+                  className="bg-blue-500 h-full rounded-full transition-all duration-500"
                   style={{ width: `${activeMetric.stabilityScore}%` }}
                 />
               </div>
-              <div className="flex justify-between text-[11px] text-[#8E8E93]">
-                <span>High Sensitivity (0%)</span>
-                <span>Robust Stability ({activeMetric.stabilityScore}%)</span>
+              <div className="flex justify-between text-[11px] text-gray-500">
+                <span>Spread collapsed (0%)</span>
+                <span>Spread preserved ({activeMetric.stabilityScore}%)</span>
               </div>
             </div>
+
+            {/* Robustness. The block above describes what imputation did to this
+                column. This one asks the different, and more consequential,
+                question: would a result derived from it survive a different
+                imputation choice, or a different assumption about the values
+                that were never recorded? It needs no ground truth. */}
+            {!activeRobustness ? (
+              <div className="rounded-2xl border border-gray-200 p-5">
+                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-gray-400" />
+                  Would the result change?
+                </h4>
+                {/* Say why rather than rendering nothing. An empty space reads as
+                    "no problem found", which is a different claim from "not
+                    measured". */}
+                <p className="text-xs text-gray-600 leading-relaxed mt-1">
+                  Not computed for{" "}
+                  <code className="font-mono font-medium text-gray-900">{activeMetric.column}</code>.
+                  The comparison re-estimates the column mean under several imputation
+                  strategies, so it applies only to numeric columns that were imputed.
+                  Identifiers and columns left flagged are excluded.
+                </p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-gray-200 p-5 space-y-4">
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-blue-500" />
+                    Would the result change?
+                  </h4>
+                  <p className="text-xs text-gray-600 leading-relaxed mt-1">
+                    {activeRobustness.interpretation}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400 mb-2">
+                    Estimate under each strategy
+                  </p>
+                  {/* Validity matters more than the numbers here. Mean, median
+                      and complete-case are unbiased only under MCAR
+                      (van Buuren 2018, Table 1.1), so for a MAR column they
+                      differ by construction. Showing them as equals would
+                      report disagreement that is expected rather than
+                      informative, so they are marked and excluded from the
+                      spread. */}
+                  <div className="space-y-1">
+                    {activeRobustness.strategies.map((s) => {
+                      const valid = s.valid_under_mechanism === true;
+                      return (
+                        <div key={s.strategy} className="flex items-center justify-between text-xs gap-3">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className={`font-mono truncate ${valid ? "text-gray-900" : "text-gray-400"}`}>
+                              {s.strategy === "complete_case" ? "complete case" : s.strategy}
+                            </span>
+                            {!valid && (
+                              <span
+                                title="Unbiased only under MCAR, so not valid for this column's diagnosed mechanism"
+                                className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500"
+                              >
+                                not valid here
+                              </span>
+                            )}
+                          </span>
+                          <span className={`tabular-nums shrink-0 ${valid ? "text-gray-900" : "text-gray-400"}`}>
+                            {s.estimate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {typeof s.shift_vs_complete_case_pct === "number" && s.strategy !== "complete_case" && (
+                              <span className="ml-2 text-gray-500">
+                                {s.shift_vs_complete_case_pct > 0 ? "+" : ""}
+                                {s.shift_vs_complete_case_pct}%
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                    {activeRobustness.valid_methods && activeRobustness.valid_methods.length > 0 ? (
+                      <>
+                        Spread of <strong className="text-gray-900">{activeRobustness.spread_pct_of_estimate}%</strong>{" "}
+                        measured across {activeRobustness.valid_methods.join(" and ")}, the methods unbiased under
+                        this mechanism. Greyed rows are shown for contrast only.
+                      </>
+                    ) : (
+                      <>No method is unbiased under this mechanism, so the comparison is descriptive only.</>
+                    )}
+                  </p>
+                </div>
+
+                {activeRobustness.mnar_sweep.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400 mb-2">
+                      If the unrecorded values were different
+                    </p>
+                    <div className="flex items-end gap-1.5 h-16">
+                      {activeRobustness.mnar_sweep.map((p) => {
+                        const values = activeRobustness.mnar_sweep.map((q) => q.estimate);
+                        const lo = Math.min(...values);
+                        const hi = Math.max(...values);
+                        const height = hi === lo ? 50 : 20 + ((p.estimate - lo) / (hi - lo)) * 80;
+                        return (
+                          <div key={p.delta_sd} className="flex-1 flex flex-col items-center gap-1">
+                            <div
+                              title={`${p.assumption}: ${p.estimate}`}
+                              className={`w-full rounded-t ${p.delta_sd === 0 ? "bg-blue-500" : "bg-blue-500/25"}`}
+                              style={{ height: `${height}%` }}
+                            />
+                            <span className="text-[10px] text-gray-500 tabular-nums">
+                              {p.delta_sd > 0 ? "+" : ""}
+                              {p.delta_sd}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                      Standard deviations of assumed departure. The solid bar is the assumption
+                      actually used. A conclusion that holds across the whole range does not
+                      depend on it.
+                      {/* The shift applies only to imputed cells, so its effect on the
+                          mean scales with how much is missing. Stating both keeps the
+                          figure comparable with other columns. */}
+                      {typeof activeRobustness.missing_fraction === "number" && (
+                        <>
+                          {" "}This column is{" "}
+                          <strong className="text-gray-900">
+                            {(activeRobustness.missing_fraction * 100).toFixed(1)}%
+                          </strong>{" "}
+                          missing, and the shift applies only to those rows, so its effect on the
+                          mean scales with that proportion.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-sm text-[#8E8E93]">
+          <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
             Select a column on the left to view scenario breakdown.
           </div>
         )}
@@ -350,7 +496,7 @@ export default function SensitivityTab() {
             whileTap={{ scale: 0.99 }}
             transition={{ duration: 0.2, ease: EASE }}
             onClick={() => dispatch(setActiveTab("diagnosis"))}
-            className="inline-flex items-center justify-center gap-2.5 bg-[#0071E3] hover:bg-[#0077ED] text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
+            className="inline-flex items-center justify-center gap-2.5 bg-blue-500 hover:bg-blue-600 text-white text-base font-medium px-6 py-3.5 rounded-full shadow-[0_4px_12px_rgba(0,113,227,0.25)] hover:shadow-[0_6px_16px_rgba(0,113,227,0.32)] transition-shadow duration-300 w-full"
           >
             Review Diagnostic Rationale →
           </motion.button>
@@ -361,7 +507,7 @@ export default function SensitivityTab() {
             whileTap={{ scale: 0.99 }}
             transition={{ duration: 0.2, ease: EASE }}
             onClick={() => dispatch(setActiveTab("explanation"))}
-            className="inline-flex items-center justify-center gap-2 bg-[#F5F5F7] hover:bg-[#E8E8ED] text-[#1D1D1F] text-sm font-medium px-6 py-3 rounded-full transition-colors duration-200 w-full"
+            className="inline-flex items-center justify-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-900 text-sm font-medium px-6 py-3 rounded-full transition-colors duration-200 w-full"
           >
             View Plain-Language Explanations
           </motion.button>
