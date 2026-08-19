@@ -101,6 +101,18 @@ def parse_data_dictionary(content: str | None) -> dict[str, str]:
     return parsed
 
 
+def _looks_like_dates(s: pd.Series, threshold: float = 0.8) -> bool:
+    """True when most non-null values parse as dates."""
+    if pd.api.types.is_datetime64_any_dtype(s):
+        return True
+    valid = s.dropna()
+    if valid.empty or pd.api.types.is_numeric_dtype(valid):
+        return False
+    sample = valid.astype(str).head(50)
+    parsed = pd.to_datetime(sample, errors="coerce", dayfirst=True)
+    return bool(parsed.notna().mean() >= threshold)
+
+
 def infer_column_assumptions(
     df: pd.DataFrame,
     user_descriptions: dict[str, str] | None = None,
@@ -134,10 +146,38 @@ def infer_column_assumptions(
     if not needs_inference:
         return assumptions
 
+    # Example values are sent to a third-party API, so identifier columns must
+    # not contribute any. Five distinct values from a column like patid or
+    # staffid means five real identifiers leaving the machine, which is a
+    # disclosure the tool has no need to make: the column name and its
+    # cardinality are enough to infer that it is an identifier.
+    from app.core.column_semantics import classify_dataset_semantics, SemanticRole
+
+    try:
+        semantics = classify_dataset_semantics(df)
+        identifier_cols = {
+            c for c, info in semantics.items()
+            if info and info.role == SemanticRole.IDENTIFIER
+        }
+    except Exception:  # classification is best-effort; withhold examples if unsure
+        identifier_cols = set(df.columns)
+
     summary_lines = []
     for col in needs_inference:
         s = df[col]
         bits = [f"dtype={s.dtype}", f"unique={int(s.nunique(dropna=True))}"]
+        if col in identifier_cols:
+            # Shape only. No values.
+            bits.append("examples=<withheld: identifier>")
+            summary_lines.append(f"- {col}: " + ", ".join(bits))
+            continue
+        # Exact dates are quasi-identifiers in health data: a consultation date
+        # combined with a practice can narrow a record to one person. The model
+        # only needs to know the column holds dates, not which ones.
+        if _looks_like_dates(s):
+            bits.append("examples=<withheld: date-like>")
+            summary_lines.append(f"- {col}: " + ", ".join(bits))
+            continue
         if pd.api.types.is_numeric_dtype(s):
             valid = s.dropna()
             if not valid.empty:

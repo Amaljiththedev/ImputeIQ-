@@ -36,8 +36,78 @@ class ColumnImputation:
     method_used: str
     low_confidence: bool
     rationale: str
+    # Cells actually filled, counted from the frame afterwards. This used to be
+    # set to diag.n_missing -- the number of gaps found BEFORE imputation ran --
+    # so it reported every attempt as a success. A CPRD extract reported 852
+    # values imputed for `value` when 106 were filled and 746 were left missing.
     n_imputed: int
+    # Cells the method could not fill, and why. Imputation within measurement
+    # strata has no donor for a stratum where nothing was ever observed, and
+    # borrowing one from another stratum would invent a value on a scale this
+    # measurement has never been seen at.
+    n_unimputable: int = 0
+    unimputable_reason: str | None = None
     semantic_role: str = None
+
+
+def _count_filled(
+    before: pd.DataFrame,
+    after: pd.DataFrame,
+    col: str,
+    stratum: str | None,
+    method: str | None = None,
+) -> tuple[int, int, str | None]:
+    """Return (filled, still_missing, reason) for one column.
+
+    Counted from the data rather than assumed from the diagnosis, because a
+    method can legitimately decline to fill a cell. Within-strata imputation
+    does exactly that when a stratum holds no observed value at all: there is
+    no donor, and no way to know the scale of a measurement never recorded.
+    """
+    if col not in after.columns:
+        return 0, int(before[col].isna().sum()), "column absent from the imputed frame"
+
+    was_missing = before[col].isna()
+    still_missing = after[col].isna()
+    filled = int((was_missing & ~still_missing).sum())
+    remaining = int(still_missing.sum())
+
+    reason = None
+    if remaining:
+        # flag_only leaves the values alone on purpose: fabricating an
+        # identifier would point at a record that does not exist. That is the
+        # method working, not failing to.
+        if (method or "").lower() == "flag_only":
+            return filled, remaining, (
+                f"{remaining} row(s) left null by design; identifiers are flagged in "
+                f"'{col}_missing' rather than imputed"
+            )
+        if stratum and stratum in before.columns:
+            observed_per_stratum = before.groupby(stratum)[col].apply(lambda s: s.notna().sum())
+            empty = [k for k, n in observed_per_stratum.items() if n == 0]
+            if empty:
+                # A group where the column was NEVER observed is not a group with
+                # missing data; it is a group the variable does not apply to. The
+                # rule is known and stateable, so state it, and recommend giving
+                # the absent case a name instead of leaving it blank -- a defined
+                # category can be analysed, whereas a blank invites imputation
+                # that would be inventing values for a quantity never measured.
+                shown = ", ".join(str(k) for k in empty[:3])
+                if len(empty) > 3:
+                    shown += f", and {len(empty) - 3} more"
+                reason = (
+                    f"{remaining} row(s) belong to {len(empty)} '{stratum}' group(s) "
+                    f"({shown}) where {col} was never recorded at all. The rule is that "
+                    f"{col} does not apply to these groups, so these are not missing "
+                    f"values and imputing them would invent measurements that never "
+                    f"existed. Recommended: re-code {col} for these rows with an "
+                    f"explicit category such as 'not_applicable', defined in your data "
+                    f"dictionary, so they are analysed as a known category rather than "
+                    f"counted as missing data."
+                )
+        if reason is None:
+            reason = f"{remaining} row(s) had no usable predictor and were left missing"
+    return filled, remaining, reason
 
 
 def diagnose_all_columns(
@@ -184,6 +254,7 @@ def impute_all_columns(
                 structural_zero_warning=diag.structural_zero_warning,
                 semantic_role=diag.semantic_role,
             )
+        filled, remaining, reason = _count_filled(imputed_df, temp_df, col, stratum, decision.method)
         imputed_df[col] = temp_df[col]
 
         # flag_only produces a companion "<col>_missing" indicator column --
@@ -199,7 +270,9 @@ def impute_all_columns(
                 method_used=decision.method,
                 low_confidence=decision.low_confidence,
                 rationale=decision.rationale,
-                n_imputed=diag.n_missing,
+                n_imputed=filled,
+                n_unimputable=remaining,
+                unimputable_reason=reason,
                 semantic_role=diag.semantic_role,
             )
         )
@@ -266,6 +339,7 @@ def impute_all_columns_with_overrides(
             )
         else:
             temp_df = imputer_fn(imputed_df, cols_to_impute)
+        filled, remaining, reason = _count_filled(imputed_df, temp_df, col, stratum, chosen_key)
         imputed_df[col] = temp_df[col]
 
         flag_col = f"{col}_missing"
@@ -288,7 +362,9 @@ def impute_all_columns_with_overrides(
                 method_used=display_method,
                 low_confidence=decision.low_confidence,
                 rationale=rationale,
-                n_imputed=diag.n_missing,
+                n_imputed=filled,
+                n_unimputable=remaining,
+                unimputable_reason=reason,
                 semantic_role=diag.semantic_role,
             )
         )

@@ -56,7 +56,11 @@ export default function ExplanationTab() {
   }
 
   const columns = explanation.columns_json || [];
-  const isAI = explanation.generated_by === "gemini";
+  // The backend reports "language_model" regardless of provider. This compared
+  // against "gemini", a value it stopped emitting when the provider changed, so
+  // every genuine model explanation was labelled as template output. Only
+  // "template_fallback" actually means the model did not write this.
+  const isAI = explanation.generated_by !== "template_fallback";
 
   return (
     <div className="space-y-8 pb-12">

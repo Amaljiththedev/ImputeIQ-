@@ -81,8 +81,17 @@ export default function SensitivityTab() {
     );
   }
 
+  // Open on a column the robustness comparison actually covers. Falling back to
+  // metrics[0] put an identifier (never imputed, so never analysed) in the panel
+  // on first render, which silently hid the robustness block until the user
+  // happened to click a numeric column.
+  const defaultMetric =
+    metrics.find((m) => robustness.some((r) => r.column === m.column)) ||
+    metrics[0] ||
+    null;
+
   const activeMetric =
-    metrics.find((m) => m.column === selectedColumn) || metrics[0] || null;
+    metrics.find((m) => m.column === selectedColumn) || defaultMetric;
 
   const avgStability = Math.round(
     metrics.reduce((acc, m) => acc + m.stabilityScore, 0) / metrics.length
@@ -340,7 +349,24 @@ export default function SensitivityTab() {
                 question: would a result derived from it survive a different
                 imputation choice, or a different assumption about the values
                 that were never recorded? It needs no ground truth. */}
-            {activeRobustness && (
+            {!activeRobustness ? (
+              <div className="rounded-2xl border border-gray-200 p-5">
+                <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-gray-400" />
+                  Would the result change?
+                </h4>
+                {/* Say why rather than rendering nothing. An empty space reads as
+                    "no problem found", which is a different claim from "not
+                    measured". */}
+                <p className="text-xs text-gray-600 leading-relaxed mt-1">
+                  Not computed for{" "}
+                  <code className="font-mono font-medium text-gray-900">{activeMetric.column}</code>.
+                  The comparison re-estimates the column mean under several imputation
+                  strategies, so it applies only to numeric columns that were imputed.
+                  Identifiers and columns left flagged are excluded.
+                </p>
+              </div>
+            ) : (
               <div className="rounded-2xl border border-gray-200 p-5 space-y-4">
                 <div>
                   <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -356,28 +382,55 @@ export default function SensitivityTab() {
                   <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-400 mb-2">
                     Estimate under each strategy
                   </p>
+                  {/* Validity matters more than the numbers here. Mean, median
+                      and complete-case are unbiased only under MCAR
+                      (van Buuren 2018, Table 1.1), so for a MAR column they
+                      differ by construction. Showing them as equals would
+                      report disagreement that is expected rather than
+                      informative, so they are marked and excluded from the
+                      spread. */}
                   <div className="space-y-1">
-                    {activeRobustness.strategies.map((s) => (
-                      <div key={s.strategy} className="flex items-center justify-between text-xs">
-                        <span className="font-mono text-gray-700">
-                          {s.strategy === "complete_case" ? "complete case" : s.strategy}
-                        </span>
-                        <span className="tabular-nums text-gray-900">
-                          {s.estimate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                          {typeof s.shift_vs_complete_case_pct === "number" && s.strategy !== "complete_case" && (
-                            <span
-                              className={`ml-2 ${
-                                Math.abs(s.shift_vs_complete_case_pct) >= 5 ? "text-warning-fg" : "text-gray-500"
-                              }`}
-                            >
-                              {s.shift_vs_complete_case_pct > 0 ? "+" : ""}
-                              {s.shift_vs_complete_case_pct}%
+                    {activeRobustness.strategies.map((s) => {
+                      const valid = s.valid_under_mechanism === true;
+                      return (
+                        <div key={s.strategy} className="flex items-center justify-between text-xs gap-3">
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span className={`font-mono truncate ${valid ? "text-gray-900" : "text-gray-400"}`}>
+                              {s.strategy === "complete_case" ? "complete case" : s.strategy}
                             </span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
+                            {!valid && (
+                              <span
+                                title="Unbiased only under MCAR, so not valid for this column's diagnosed mechanism"
+                                className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500"
+                              >
+                                not valid here
+                              </span>
+                            )}
+                          </span>
+                          <span className={`tabular-nums shrink-0 ${valid ? "text-gray-900" : "text-gray-400"}`}>
+                            {s.estimate.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            {typeof s.shift_vs_complete_case_pct === "number" && s.strategy !== "complete_case" && (
+                              <span className="ml-2 text-gray-500">
+                                {s.shift_vs_complete_case_pct > 0 ? "+" : ""}
+                                {s.shift_vs_complete_case_pct}%
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
+                  <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
+                    {activeRobustness.valid_methods && activeRobustness.valid_methods.length > 0 ? (
+                      <>
+                        Spread of <strong className="text-gray-900">{activeRobustness.spread_pct_of_estimate}%</strong>{" "}
+                        measured across {activeRobustness.valid_methods.join(" and ")}, the methods unbiased under
+                        this mechanism. Greyed rows are shown for contrast only.
+                      </>
+                    ) : (
+                      <>No method is unbiased under this mechanism, so the comparison is descriptive only.</>
+                    )}
+                  </p>
                 </div>
 
                 {activeRobustness.mnar_sweep.length > 0 && (
@@ -410,6 +463,19 @@ export default function SensitivityTab() {
                       Standard deviations of assumed departure. The solid bar is the assumption
                       actually used. A conclusion that holds across the whole range does not
                       depend on it.
+                      {/* The shift applies only to imputed cells, so its effect on the
+                          mean scales with how much is missing. Stating both keeps the
+                          figure comparable with other columns. */}
+                      {typeof activeRobustness.missing_fraction === "number" && (
+                        <>
+                          {" "}This column is{" "}
+                          <strong className="text-gray-900">
+                            {(activeRobustness.missing_fraction * 100).toFixed(1)}%
+                          </strong>{" "}
+                          missing, and the shift applies only to those rows, so its effect on the
+                          mean scales with that proportion.
+                        </>
+                      )}
                     </p>
                   </div>
                 )}

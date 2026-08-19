@@ -93,7 +93,12 @@ export interface ImputationResult {
   method_used: string;
   low_confidence: boolean;
   rationale: string;
+  /** Cells actually filled, counted after imputation ran. */
   n_imputed: number;
+  /** Cells deliberately left missing, with the reason. A column imputed within
+   *  measurement strata has no donor for a stratum where nothing was observed. */
+  n_unimputable?: number | null;
+  unimputable_reason?: string | null;
   imputed_file_path: string;
   semantic_role?: string | null;
 }
@@ -109,7 +114,10 @@ export interface ExplanationColumnResult {
 
 export interface ExplanationResult {
   id: string;
-  generated_by: "gemini" | "template_fallback";
+  /** "language_model" when a provider wrote it, "template_fallback" when the
+   *  deterministic local text was used instead. "gemini" appears only on rows
+   *  stored before the provider seam existed. */
+  generated_by: "language_model" | "template_fallback" | "gemini";
   overall_summary: string;
   columns_json: ExplanationColumnResult[];
 }
@@ -330,12 +338,19 @@ export interface RobustnessStrategy {
   sd: number;
   n: number;
   shift_vs_complete_case_pct?: number;
+  /** Unbiased under the diagnosed mechanism (van Buuren 2018, Table 1.1). */
+  valid_under_mechanism?: boolean;
 }
 
 export interface RobustnessSweepPoint {
   delta_sd: number;
   estimate: number;
   shift_vs_observed_pct: number;
+  /** The shift applies only to imputed cells, so its effect on the mean scales
+   *  with how much is missing. This figure removes that, making columns with
+   *  different missingness comparable. */
+  shift_per_unit_missing_pct?: number;
+  missing_fraction?: number;
   assumption: string;
 }
 
@@ -346,6 +361,9 @@ export interface RobustnessColumn {
   strategies: RobustnessStrategy[];
   estimate_range?: [number, number] | null;
   spread_pct_of_estimate: number;
+  /** Methods unbiased under this mechanism; the spread is measured over these. */
+  valid_methods?: string[] | null;
+  missing_fraction?: number;
   mnar_sweep: RobustnessSweepPoint[];
   robust_to_method_choice: boolean;
   interpretation: string;

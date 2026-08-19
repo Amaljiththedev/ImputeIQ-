@@ -274,12 +274,70 @@ def test_strategy_comparison_includes_the_do_nothing_baseline():
 
 def test_strategy_comparison_reports_how_far_the_estimate_travels():
     from app.core.sensitivity_engine import compare_imputation_strategies
-    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"])
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"], mechanism="MAR")
     summary = next(r for r in got if r["strategy"] == "__summary__")
     lo, hi = summary["estimate_range"]
     assert lo <= hi
     assert summary["spread"] == pytest.approx(hi - lo, abs=1e-6)
     assert summary["spread_pct_of_estimate"] >= 0
+
+
+def test_spread_excludes_methods_invalid_for_the_mechanism():
+    """Supervisor's point: mean and median are unbiased only under MCAR
+    (van Buuren 2018, Table 1.1). Including them for a MAR column reports
+    disagreement that is expected by construction rather than informative."""
+    from app.core.sensitivity_engine import compare_imputation_strategies
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"], mechanism="MAR")
+    by_name = {r["strategy"]: r for r in got if r["strategy"] != "__summary__"}
+    assert by_name["median"]["valid_under_mechanism"] is False
+    assert by_name["mean"]["valid_under_mechanism"] is False
+    assert by_name["complete_case"]["valid_under_mechanism"] is False
+    assert by_name["pmm"]["valid_under_mechanism"] is True
+    assert by_name["mice"]["valid_under_mechanism"] is True
+
+    summary = next(r for r in got if r["strategy"] == "__summary__")
+    assert set(summary["valid_methods"]) == {"pmm", "mice"}
+
+
+def test_under_mcar_the_simple_methods_are_valid_too():
+    from app.core.sensitivity_engine import compare_imputation_strategies
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"], mechanism="MCAR")
+    by_name = {r["strategy"]: r for r in got if r["strategy"] != "__summary__"}
+    assert by_name["median"]["valid_under_mechanism"] is True
+    assert by_name["complete_case"]["valid_under_mechanism"] is True
+
+
+def test_under_mnar_no_method_is_marked_valid():
+    """Nothing is unbiased under MNAR without an untestable assumption, so the
+    comparison must be presented as descriptive rather than authoritative."""
+    from app.core.sensitivity_engine import compare_imputation_strategies
+    got = compare_imputation_strategies(_frame_with_gaps(), "x", ["x", "y"], mechanism="MNAR")
+    assert not any(r.get("valid_under_mechanism") for r in got if r["strategy"] != "__summary__")
+    summary = next(r for r in got if r["strategy"] == "__summary__")
+    assert summary["valid_methods"] == []
+    assert "descriptive" in summary["note"]
+
+
+def test_sweep_reports_the_missingness_that_scales_it():
+    """Supervisor's point: the shift applies only to imputed cells, so its
+    effect on the mean is delta * sd * missing_fraction. A 50%-missing column
+    moves ten times as far as a 5%-missing one under the same assumption, so
+    the raw percentage is not comparable across columns without it."""
+    from app.core.sensitivity_engine import mnar_delta_sweep
+    light = _frame_with_gaps(missing=20)     # 5%
+    heavy = _frame_with_gaps(missing=200)    # 50%
+
+    l = next(p for p in mnar_delta_sweep(light, "x", ["x", "y"]) if p["delta_sd"] == 1.0)
+    h = next(p for p in mnar_delta_sweep(heavy, "x", ["x", "y"]) if p["delta_sd"] == 1.0)
+
+    assert l["missing_fraction"] < h["missing_fraction"]
+    # The same assumed departure moves the heavier column much further...
+    assert abs(h["shift_vs_observed_pct"]) > abs(l["shift_vs_observed_pct"])
+    # ...but per unit of missingness the two are comparable, which is the
+    # figure that can be quoted across columns.
+    assert h["shift_per_unit_missing_pct"] == pytest.approx(
+        l["shift_per_unit_missing_pct"], rel=0.35
+    )
 
 
 def test_mnar_sweep_is_monotonic_and_centres_on_the_mar_assumption():

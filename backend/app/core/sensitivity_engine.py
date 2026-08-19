@@ -18,11 +18,53 @@ from app.core.imputation_engine import IMPUTERS
 logger = logging.getLogger(__name__)
 
 
+# Which methods are unbiased under which mechanism, from van Buuren (2018)
+# Table 1.1. Listwise deletion, mean and median are unbiased only under MCAR;
+# stochastic regression (chained equations, and predictive mean matching as its
+# matching variant) is unbiased under MAR and therefore also under MCAR, which
+# is a special case of it.
+#
+# This matters for the comparison below. Including a method that is invalid for
+# the diagnosed mechanism inflates the apparent disagreement: the estimates
+# differ because one of them is wrong by construction, not because the result is
+# fragile. Validity is therefore recorded per strategy, and the headline spread
+# is computed over the valid ones only.
+METHOD_VALIDITY = {
+    "complete_case": {"MCAR"},
+    "mean": {"MCAR"},
+    "median": {"MCAR"},
+    "mice": {"MCAR", "MAR"},
+    "pmm": {"MCAR", "MAR"},
+    "regression": {"MCAR", "MAR"},
+}
+
+
+def _is_valid_under(method: str, mechanism: str | None) -> bool:
+    """Whether a method is unbiased under the diagnosed mechanism.
+
+    Under MNAR nothing is valid without an untestable assumption, so no method
+    is marked valid and the comparison becomes purely descriptive.
+    """
+    from app.core.diagnose_mechanism import MechanismClass, classify_mechanism
+
+    cls = classify_mechanism(mechanism)
+    if cls is MechanismClass.MNAR:
+        return False
+    if cls in (MechanismClass.UNRESOLVED, MechanismClass.OTHER):
+        # The mechanism is not established, or none was supplied. Validity
+        # cannot be claimed either way, so MAR is assumed: it is the more
+        # demanding of the two, and assuming MCAR would license methods that
+        # fail if that assumption is wrong.
+        cls = MechanismClass.MAR
+    return cls.value in METHOD_VALIDITY.get(method, set())
+
+
 def compare_imputation_strategies(
     df: pd.DataFrame,
     target_col: str,
     numeric_cols: list[str],
     methods: tuple[str, ...] = ("complete_case", "median", "mean", "pmm", "mice"),
+    mechanism: str | None = None,
 ) -> list[dict[str, Any]]:
     """Estimate the same quantity under several imputation strategies.
 
@@ -61,24 +103,41 @@ def compare_imputation_strategies(
                 "estimate": round(float(series.mean()), 4),
                 "sd": round(float(series.std(ddof=1)), 4) if len(series) > 1 else 0.0,
                 "n": int(len(series)),
+                "valid_under_mechanism": _is_valid_under(method, mechanism),
             })
         except Exception as exc:  # a strategy that cannot run is reported, not fatal
             logger.warning("Strategy %s unavailable for %s: %s", method, target_col, exc)
 
     if results:
-        estimates = [r["estimate"] for r in results]
-        spread = max(estimates) - min(estimates)
         reference = abs(results[0]["estimate"]) or 1.0
         for r in results:
             r["shift_vs_complete_case_pct"] = round(
                 (r["estimate"] - results[0]["estimate"]) / reference * 100.0, 2
             )
+
+        # Headline spread over methods that are actually valid for this
+        # mechanism. Including an invalid method would report disagreement that
+        # is expected rather than informative.
+        valid = [r["estimate"] for r in results if r.get("valid_under_mechanism")]
+        allest = [r["estimate"] for r in results]
+        spread_valid = (max(valid) - min(valid)) if len(valid) > 1 else 0.0
+
         results.append({
             "strategy": "__summary__",
             "n_missing": n_missing,
-            "estimate_range": [round(min(estimates), 4), round(max(estimates), 4)],
-            "spread": round(spread, 4),
-            "spread_pct_of_estimate": round(spread / reference * 100.0, 2),
+            "mechanism": mechanism,
+            "valid_methods": [r["strategy"] for r in results if r.get("valid_under_mechanism")],
+            "estimate_range": [round(min(valid), 4), round(max(valid), 4)] if valid else None,
+            "estimate_range_all_methods": [round(min(allest), 4), round(max(allest), 4)],
+            "spread": round(spread_valid, 4),
+            "spread_pct_of_estimate": round(spread_valid / reference * 100.0, 2),
+            "note": (
+                "Spread is measured across methods that are unbiased under the diagnosed "
+                "mechanism (van Buuren 2018, Table 1.1). Methods valid only under MCAR are "
+                "shown for contrast but excluded from it."
+                if valid else
+                "No method is unbiased under this mechanism, so the comparison is descriptive only."
+            ),
         })
     return results
 
@@ -121,17 +180,34 @@ def mnar_delta_sweep(
         filled = observed.fillna(obs_only.median())
 
     gaps = observed.isna()
+    missing_fraction = float(gaps.mean())
+
+    # The shift is applied only to the imputed cells, so its effect on the
+    # overall mean is delta * sd * missing_fraction. A column that is 50%
+    # missing therefore moves ten times as far as one that is 5% missing under
+    # the same assumed departure. Reporting only the percentage movement would
+    # conflate the strength of the assumption with the amount of missing data
+    # and make columns incomparable, so both the fraction and the movement
+    # expressed per unit of missingness are returned alongside it.
     out: list[dict[str, Any]] = []
     for delta in deltas:
         shifted = filled.copy()
         shifted[gaps] = shifted[gaps] + delta * sd
         est = float(shifted.mean())
+        movement = est - baseline
         out.append({
             "delta_sd": delta,
             "estimate": round(est, 4),
-            "shift_vs_observed_pct": round(
-                (est - baseline) / (abs(baseline) or 1.0) * 100.0, 2
-            ),
+            "shift_vs_observed_pct": round(movement / (abs(baseline) or 1.0) * 100.0, 2),
+            # Movement expressed in standard deviations of the observed data,
+            # which is comparable across columns of different scale.
+            "shift_in_sd": round(movement / sd, 4) if sd > 0 else 0.0,
+            "missing_fraction": round(missing_fraction, 4),
+            # What the same assumed departure would do at 100% missingness,
+            # isolating the strength of the assumption from how much is absent.
+            "shift_per_unit_missing_pct": round(
+                (movement / (abs(baseline) or 1.0) * 100.0) / missing_fraction, 2
+            ) if missing_fraction > 0 else 0.0,
             "assumption": (
                 "MAR, as routed" if delta == 0
                 else f"missing values {'higher' if delta > 0 else 'lower'} by {abs(delta)} SD"

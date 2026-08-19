@@ -459,15 +459,34 @@ def get_job(job: Job = Depends(get_job_or_404), db: Session = Depends(get_db)):
 # Fetch all stored results for a dataset
 # ---------------------------------------------------------------------------
 
+def _latest_per_column(rows: list) -> list:
+    """Keep only the most recent row for each target column.
+
+    Re-running imputation with a different method appends new rows rather than
+    replacing the old ones, which is what makes the run history recoverable.
+    Callers that want the current state of the dataset want one row per column,
+    though: without this, changing Insulin from PMM to KNN left the results
+    listing both, and the sensitivity figures were computed twice over the same
+    column.
+    """
+    newest: dict[str, object] = {}
+    for row in rows:
+        key = row.target_column
+        current = newest.get(key)
+        if current is None or (row.created_at and current.created_at and row.created_at >= current.created_at):
+            newest[key] = row
+    return list(newest.values())
+
+
 @router.get("/datasets/{dataset_id}/results", response_model=DatasetResultsOut)
 def get_dataset_results(
     dataset: Dataset = Depends(get_dataset_or_404),
     db: Session = Depends(get_db),
 ) -> DatasetResultsOut:
-    diagnosis_results = (
+    diagnosis_results = _latest_per_column(
         db.query(DiagnosisResult).filter(DiagnosisResult.dataset_id == dataset.id).all()
     )
-    imputation_results = (
+    imputation_results = _latest_per_column(
         db.query(ImputationResult).filter(ImputationResult.dataset_id == dataset.id).all()
     )
     explanation_results = (
@@ -490,10 +509,10 @@ def get_dataset_sensitivity(
     dataset: Dataset = Depends(get_dataset_or_404),
     db: Session = Depends(get_db),
 ) -> list[SensitivityMetricOut]:
-    diagnosis_results = (
+    diagnosis_results = _latest_per_column(
         db.query(DiagnosisResult).filter(DiagnosisResult.dataset_id == dataset.id).all()
     )
-    imputation_results = (
+    imputation_results = _latest_per_column(
         db.query(ImputationResult).filter(ImputationResult.dataset_id == dataset.id).all()
     )
     metrics_raw = compute_column_sensitivity(dataset, diagnosis_results, imputation_results)
@@ -544,7 +563,7 @@ def get_robustness_analysis(
     columns = []
     for d in targets:
         col = d.target_column
-        strategies = compare_imputation_strategies(df, col, numeric_cols)
+        strategies = compare_imputation_strategies(df, col, numeric_cols, mechanism=d.diagnosed_mechanism)
         sweep = mnar_delta_sweep(df, col, numeric_cols)
         summary = next((s for s in strategies if s.get("strategy") == "__summary__"), {})
         spread_pct = float(summary.get("spread_pct_of_estimate") or 0.0)
@@ -559,6 +578,8 @@ def get_robustness_analysis(
             "mnar_sweep": sweep,
             # A conclusion is only safe to state as a single number if it
             # survives every strategy considered.
+            "valid_methods": summary.get("valid_methods"),
+            "missing_fraction": round((d.n_missing / max(len(df),1)), 4),
             "robust_to_method_choice": spread_pct < 5.0,
             "interpretation": (
                 f"The estimate moves by {spread_pct:.1f}% across imputation strategies. "

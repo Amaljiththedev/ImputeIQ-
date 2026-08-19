@@ -147,6 +147,13 @@ class ImputationResult(Base):
     rationale = Column(Text, nullable=False)
     semantic_role = Column(String, nullable=True)  # "identifier" | "categorical" | "continuous"
     n_imputed = Column(Integer, nullable=False)
+    # Cells the method declined to fill, and why. Imputation within measurement
+    # strata has no donor for a stratum where nothing was ever observed, and
+    # borrowing one would invent a value on a scale never seen for that
+    # measurement. Leaving those missing is correct; saying nothing about it
+    # is not, since the download then has gaps with no explanation.
+    n_unimputable = Column(Integer, nullable=True, default=0)
+    unimputable_reason = Column(Text, nullable=True)
     imputed_file_path = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_now)
 

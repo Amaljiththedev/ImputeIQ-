@@ -7,7 +7,7 @@ imputation results. The provider lives behind app/core/llm_client.py.
 1. Replies are validated against the Pydantic models in
    explanation_schema.py. The provider cannot enforce a schema server-side,
    so the shape is requested in the prompt and checked locally.
-2. Retry with fixed backoff (via tenacity) for transient failures
+2. Retry with exponential backoff (via tenacity) for transient failures
    (network errors, rate limits, 5xx) and for replies that fail validation.
 
 Note: generate_explanation() raises if the model fails after all retries, so
@@ -22,26 +22,31 @@ so the UI never presents template text as real model output.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 from tenacity import (
     retry,
     retry_if_exception_type,
     stop_after_attempt,
-    wait_fixed,
+    wait_exponential,
 )
 
 from app.core.explanation_schema import DatasetExplanation, MechanismExplanation
 from app.core.llm_client import LLMUnavailable, complete_json, complete_text
 
 logger = logging.getLogger(__name__)
-# MAX_RETRY_ATTEMPTS=1 meant stop_after_attempt(1) never actually retried --
-# restored to a small number so transient failures (network blips, brief
-# 5xx) get a genuine second/third chance before falling back. This does
-# NOT protect against sustained 429 rate-limit exhaustion (see fallback
-# below) -- no retry count can wait out a free-tier daily quota reset.
-MAX_RETRY_ATTEMPTS = 3
-RETRY_WAIT_SECONDS = 1
+# Raised from 3 to 7 with exponential backoff. A rate limit is the common
+# failure and it clears on its own: a fixed one-second gap retried three times
+# gives up after three seconds, which is far too soon. The waits below run
+# 2, 4, 8, 16, 30, 30 seconds, so a transient 429 or 5xx has about ninety
+# seconds to clear before the template is used. The fallback still exists for
+# a genuinely exhausted quota or a missing key, because no retry count can
+# wait out a daily limit, and hanging the pipeline forever would be worse
+# than plainer text -- but it should now be rare rather than routine.
+MAX_RETRY_ATTEMPTS = 7
+RETRY_WAIT_MIN_SECONDS = 2
+RETRY_WAIT_MAX_SECONDS = 30
 
 
 class LLMGenerationError(Exception):
@@ -73,7 +78,7 @@ def _build_prompt(column_reports: list[dict]) -> str:
         "Adhere to these high analytical standards across all fields:",
         "1. overall_summary: Write an authoritative, comprehensive executive synthesis of the dataset's missingness profile. Detail what dominant patterns emerged across variables (MCAR, MAR, or MNAR), evaluate the overall systemic quality of the data, and explain how the selected imputation strategies preserve variance, covariance, and downstream model accuracy.",
         "2. target_column: Must match the exact target column name from the report.",
-        "3. plain_language_summary: Accurately summarize the diagnosed missing data mechanism (MCAR, MAR, or MNAR), the exact number/proportion of missing values, and the specific statistical evidence (e.g. Little's MCAR test, correlation p-values) driving this diagnosis.",
+        "3. plain_language_summary: Accurately summarize the diagnosed missing data mechanism (MCAR, MAR, or MNAR), the number and proportion of missing values, and the specific statistical evidence (e.g. Little's MCAR test, correlation p-values) driving this diagnosis. Both figures are supplied for each column below -- quote them exactly. Never write a placeholder letter or symbol in place of a number.",
         "4. what_this_means_for_the_data: Explain the practical domain consequences of these gaps. Specifically note whether dropping rows would introduce bias, explain relationship dynamics with significant driver columns if identified, and outline potential risks if left untreated.",
         "5. imputation_explanation: Provide an illuminating technical explanation of WHY the chosen algorithm (e.g. Random Forest, PyAmpute/Ampute, Predictive Mean Matching, Median/Mode) was selected. Explain how this specific strategy handles the underlying mechanism while preserving distributional properties.",
         "6. confidence_note: Carefully evaluate confidence based on sample size, missingness proportion, and the 'low_confidence' flag. State clearly what factors strengthen or limit confidence in the diagnosis and imputation.",
@@ -86,6 +91,16 @@ def _build_prompt(column_reports: list[dict]) -> str:
         lines.append(f"  Diagnosed Mechanism: {report['diagnosed_mechanism']}")
         lines.append(f"  Statistical Diagnosis Detail: {report['diagnosis_detail']}")
         lines.append(f"  Missing Value Count: {report['n_missing']}")
+        # The prompt asks for the proportion, so it has to supply the proportion.
+        # It previously gave only the count, and the model answered with the
+        # placeholder letters W, X, Y and Z where the percentages should have
+        # been -- it had no row total to divide by. Percentages are arithmetic,
+        # not language, so they are computed here.
+        row_count = report.get("row_count")
+        if row_count:
+            pct = 100.0 * float(report["n_missing"]) / float(row_count)
+            lines.append(f"  Total Rows: {row_count}")
+            lines.append(f"  Missing Percentage: {pct:.1f}% (use this figure verbatim)")
         lines.append(f"  Imputation Method Applied: {report.get('method_used', 'N/A')}")
         lines.append(f"  Low Confidence Flag: {report.get('low_confidence', 'False')}")
         lines.append(f"  Algorithmic Routing Rationale: {report.get('rationale', 'N/A')}")
@@ -93,10 +108,32 @@ def _build_prompt(column_reports: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# A number was asked for and a letter came back: "852 missing values (~W%)".
+# Matches a lone capital standing where a figure belongs, before a percent
+# sign or after an approximation mark. Deliberately narrow -- "N%" and "X%"
+# are the shapes actually seen, and widening it would start eating legitimate
+# prose.
+_PLACEHOLDER_NUMBER = re.compile(r"(?:[≈~]\s*[A-Z]\b|\b[A-Z]\s*%)")
+
+
+def _find_placeholder_numbers(explanation: DatasetExplanation) -> list[str]:
+    """Return every field still carrying a placeholder where a number belongs."""
+    offenders = []
+    for col in explanation.columns:
+        for field, text in col.model_dump().items():
+            if isinstance(text, str) and _PLACEHOLDER_NUMBER.search(text):
+                offenders.append(f"{col.target_column}.{field}")
+    if isinstance(explanation.overall_summary, str) and _PLACEHOLDER_NUMBER.search(
+        explanation.overall_summary
+    ):
+        offenders.append("overall_summary")
+    return offenders
+
+
 @retry(
     reraise=True,
     stop=stop_after_attempt(MAX_RETRY_ATTEMPTS),
-    wait=wait_fixed(RETRY_WAIT_SECONDS),
+    wait=wait_exponential(multiplier=1, min=RETRY_WAIT_MIN_SECONDS, max=RETRY_WAIT_MAX_SECONDS),
     retry=retry_if_exception_type(LLMGenerationError),
 )
 def _call_model_with_retry(prompt: str) -> DatasetExplanation:
@@ -107,10 +144,23 @@ def _call_model_with_retry(prompt: str) -> DatasetExplanation:
     """
     try:
         # Low temperature: this is a factual, explanatory task, not a creative one.
-        return complete_json(prompt, DatasetExplanation, temperature=0.2)
+        explanation = complete_json(prompt, DatasetExplanation, temperature=0.2)
     except LLMUnavailable as exc:
         logger.warning("Explanation model call failed: %s", exc)
         raise LLMGenerationError(str(exc)) from exc
+
+    # Schema validation passes on "(~W%)" because it is a well-formed string.
+    # Treat it as a failed generation instead: retry, and fall back to the
+    # template if the model keeps doing it. A placeholder on screen is worse
+    # than plainer wording, because it reads as a real figure at a glance.
+    offenders = _find_placeholder_numbers(explanation)
+    if offenders:
+        logger.warning("Explanation contained placeholder numbers in: %s", ", ".join(offenders))
+        raise LLMGenerationError(
+            f"placeholder used where a number belongs: {', '.join(offenders)}"
+        )
+
+    return explanation
 
 
 def generate_explanation(column_reports: list[dict]) -> ExplanationResult:

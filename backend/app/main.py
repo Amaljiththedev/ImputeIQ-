@@ -33,6 +33,8 @@ try:
         conn.execute(text("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS validated_storage_path VARCHAR;"))
         conn.execute(text("ALTER TABLE diagnosis_results ADD COLUMN IF NOT EXISTS semantic_role VARCHAR;"))
         conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS semantic_role VARCHAR;"))
+        conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS n_unimputable INTEGER DEFAULT 0;"))
+        conn.execute(text("ALTER TABLE imputation_results ADD COLUMN IF NOT EXISTS unimputable_reason TEXT;"))
         conn.execute(text("ALTER TABLE validation_decision_cache ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'gemini';"))
         conn.execute(text("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS data_dictionary TEXT;"))
         conn.execute(text("ALTER TABLE datasets DROP COLUMN IF EXISTS user_id;"))

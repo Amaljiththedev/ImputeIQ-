@@ -88,6 +88,10 @@ class ImputationResultOut(BaseModel):
     low_confidence: bool
     rationale: str
     n_imputed: int
+    # Cells left missing on purpose, and the reason. Without these the download
+    # can contain gaps the report gives no account of.
+    n_unimputable: int | None = 0
+    unimputable_reason: str | None = None
     imputed_file_path: str
     # FIX: same gap as DiagnosisResultOut -- semantic_role must be exposed
     # here too, otherwise the imputation report can't show the user why a
